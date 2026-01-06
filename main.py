@@ -506,7 +506,7 @@ class GlobalSession:
 
 class ImageHandler:
     @staticmethod
-    def fetch_avatar_async(uid, path, cb, size=(28, 28)):
+    def fetch_avatar_async(uid, path, cb, size=(32, 32)):
         def _task():
             try:
                 # 1. Try Cache
@@ -565,7 +565,7 @@ class ImageHandler:
             try:
                 img = Image.open(p).convert("RGBA")
                 pil_img = Utils.circle_crop(img)
-                return ctk.CTkImage(pil_img, size=(28, 28))
+                return ctk.CTkImage(pil_img, size=(32, 32))
             except: pass
         return None
 
@@ -1401,13 +1401,13 @@ class App(ctk.CTk):
         
         # Main Content Wrapper (Reduced Pady to 5 to fit inside better)
         content = ctk.CTkFrame(c, fg_color="transparent")
-        content.pack(side="left", fill="both", expand=True, padx=8, pady=0)
+        content.pack(side="left", fill="x", expand=True, padx=10, pady=6)
 
         # 1. Avatar (Left side of content)
         img_container = ctk.CTkFrame(content, fg_color="transparent")
-        img_container.pack(side="left")
+        img_container.pack(side="left", pady=2)
         
-        img_lbl = ctk.CTkLabel(img_container, text="", width=28)
+        img_lbl = ctk.CTkLabel(img_container, text="", width=32)
         img_lbl.pack()
         
         if ImageHandler.get_cached_avatar(acc.get("userid")): 
@@ -1417,22 +1417,22 @@ class App(ctk.CTk):
 
         # 2. Info Column (Username, Status, R$)
         info_col = ctk.CTkFrame(content, fg_color="transparent")
-        info_col.pack(side="left", padx=(10, 0), anchor="center")
+        info_col.pack(side="left", padx=(10, 0), pady=2, anchor="center")
 
         # Row A: Dot + Username (Tight fit: padx=4)
         name_row = ctk.CTkFrame(info_col, fg_color="transparent")
         name_row.pack(anchor="w")
         
-        ctk.CTkLabel(name_row, text="●", text_color=stat_col, font=("Arial", 8)).pack(side="left")
-        ctk.CTkLabel(name_row, text=acc['username'], font=FontManager.ui(11, "bold"), text_color=THEME["text_main"]).pack(side="left", padx=(4, 0))
+        ctk.CTkLabel(name_row, text="●", text_color=stat_col, font=("Arial", 9)).pack(side="left")
+        ctk.CTkLabel(name_row, text=acc['username'], font=FontManager.ui(12, "bold"), text_color=THEME["text_main"]).pack(side="left", padx=(4, 0))
 
         # Row B: Meta Data (R$ | Game Name | Status)
         meta_row = ctk.CTkFrame(info_col, fg_color="transparent")
-        meta_row.pack(anchor="w", pady=(0, 0))
+        meta_row.pack(anchor="w", pady=(1, 0))
         
         if is_verified:
-            ctk.CTkLabel(meta_row, text=f"R$ {acc.get('robux','0')}", font=FontManager.ui(8, "bold"), text_color=THEME["text_sub"]).pack(side="left")
-            ctk.CTkLabel(meta_row, text=" • ", font=FontManager.ui(8), text_color=THEME["border"]).pack(side="left")
+            ctk.CTkLabel(meta_row, text=f"R$ {acc.get('robux','0')}", font=FontManager.ui(10, "bold"), text_color=THEME["text_sub"]).pack(side="left")
+            ctk.CTkLabel(meta_row, text=" • ", font=FontManager.ui(10), text_color=THEME["border"]).pack(side="left")
             
             game_name = acc.get('last_played_name','Unknown')
             place_id = acc.get('game_id')
@@ -1441,40 +1441,40 @@ class App(ctk.CTk):
             display_game = (game_name[:20] + '..') if len(game_name) > 20 else game_name
             
             if place_id and game_name != "Unknown":
-                g_btn = ctk.CTkButton(meta_row, text=display_game, width=20, height=14, fg_color="transparent", text_color=THEME["link"], font=FontManager.ui(8), hover=False, command=lambda p=place_id: webbrowser.open(f"https://www.roblox.com/games/{p}"))
+                g_btn = ctk.CTkButton(meta_row, text=display_game, width=20, height=16, fg_color="transparent", text_color=THEME["link"], font=FontManager.ui(10), hover=False, command=lambda p=place_id: webbrowser.open(f"https://www.roblox.com/games/{p}"))
                 g_btn.pack(side="left")
             else:
-                ctk.CTkLabel(meta_row, text=display_game, font=FontManager.ui(8), text_color=THEME["text_sub"]).pack(side="left")
+                ctk.CTkLabel(meta_row, text=display_game, font=FontManager.ui(10), text_color=THEME["text_sub"]).pack(side="left")
 
             # --- STATUS RE-ADDED HERE ---
-            ctk.CTkLabel(meta_row, text=" • ", font=FontManager.ui(8), text_color=THEME["border"]).pack(side="left")
-            ctk.CTkLabel(meta_row, text=status_text, font=FontManager.ui(8), text_color=stat_col).pack(side="left")
+            ctk.CTkLabel(meta_row, text=" • ", font=FontManager.ui(10), text_color=THEME["border"]).pack(side="left")
+            ctk.CTkLabel(meta_row, text=status_text, font=FontManager.ui(10), text_color=stat_col).pack(side="left")
 
         else:
-            ctk.CTkLabel(meta_row, text="Not verified", font=FontManager.ui(8), text_color=THEME["text_sub"]).pack(side="left")
+            ctk.CTkLabel(meta_row, text="Not verified", font=FontManager.ui(10), text_color=THEME["text_sub"]).pack(side="left")
 
         # 3. Actions Group (Right Side)
         actions = ctk.CTkFrame(content, fg_color="transparent")
-        actions.pack(side="right")
+        actions.pack(side="right", pady=2)
         
         if is_verified:
             h = Utils.compute_account_health(acc)
-            ctk.CTkLabel(actions, text=f"❤ {h}%", font=FontManager.ui(8, "bold"), text_color=THEME["success"] if h>70 else THEME["warning"]).pack(side="left", padx=(0, 6))
+            ctk.CTkLabel(actions, text=f"❤ {h}%", font=FontManager.ui(10, "bold"), text_color=THEME["success"] if h>70 else THEME["warning"]).pack(side="left", padx=(0, 6))
 
             # Buttons (Reduced height to 28)
-            ModernButton(actions, text="Launch", width=60, height=20, type="primary", command=lambda: self.launch(acc)).pack(side="left", padx=3)
-            ModernButton(actions, text="Games", width=50, height=20, type="subtle", command=lambda: self.open_game_selector_for(acc)).pack(side="left", padx=3)
-            ModernButton(actions, text="Servers", width=54, height=20, type="subtle", command=lambda: self.open_server_browser_for(acc)).pack(side="left", padx=3)
+            ModernButton(actions, text="Launch", width=64, height=22, type="primary", command=lambda: self.launch(acc)).pack(side="left", padx=3)
+            ModernButton(actions, text="Games", width=54, height=22, type="subtle", command=lambda: self.open_game_selector_for(acc)).pack(side="left", padx=3)
+            ModernButton(actions, text="Servers", width=58, height=22, type="subtle", command=lambda: self.open_server_browser_for(acc)).pack(side="left", padx=3)
             
             # Icon Buttons for Job ID
-            ModernButton(actions, text="🆔", width=24, height=20, type="subtle", command=lambda: self.join_job_dialog(acc)).pack(side="left", padx=3)
+            ModernButton(actions, text="🆔", width=26, height=22, type="subtle", command=lambda: self.join_job_dialog(acc)).pack(side="left", padx=3)
 
         else:
-            ModernButton(actions, text="Login", width=60, height=20, type="warning", command=lambda: self.login(acc)).pack(side="left", padx=4)
+            ModernButton(actions, text="Login", width=64, height=22, type="warning", command=lambda: self.login(acc)).pack(side="left", padx=4)
         
         # Icon Buttons for Settings/Delete
-        ModernButton(actions, text="⚙", width=24, height=20, type="subtle", command=lambda: self.show_menu(acc)).pack(side="left", padx=3)
-        ModernButton(actions, text="🗑", width=24, height=20, type="danger", command=lambda: self.delete(acc)).pack(side="left", padx=3)
+        ModernButton(actions, text="⚙", width=26, height=22, type="subtle", command=lambda: self.show_menu(acc)).pack(side="left", padx=3)
+        ModernButton(actions, text="🗑", width=26, height=22, type="danger", command=lambda: self.delete(acc)).pack(side="left", padx=3)
 
     def show_menu(self, acc):
         global parent
