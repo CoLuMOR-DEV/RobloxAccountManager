@@ -1320,20 +1320,6 @@ class AccountManagerWindow(ctk.CTkToplevel):
         self.proxy_entry.insert(0, acc.get("proxy", ""))
         self.proxy_entry.pack(pady=6)
 
-        ctk.CTkLabel(t_data, text="Anti-AFK", text_color=THEME["text_sub"], font=FontService.ui(12, "bold")).pack(pady=(12, 2))
-        self.anti_afk_var = ctk.BooleanVar(value=acc.get("anti_afk", False))
-        self.anti_afk_switch = ctk.CTkSwitch(
-            t_data,
-            text="Enable Anti-AFK",
-            variable=self.anti_afk_var,
-            fg_color=THEME["card_hover"],
-            progress_color=THEME["accent"],
-            button_color=THEME["border"],
-            button_hover_color=THEME["separator"],
-            text_color=THEME["text_main"],
-        )
-        self.anti_afk_switch.pack(pady=(2, 10))
-
         ActionBtn(self, text="Save Changes", type="success", command=self.save).pack(fill="x", padx=18, pady=(0, 16))
         Utils.center_window(self, 440, 600)
 
@@ -1363,7 +1349,6 @@ class AccountManagerWindow(ctk.CTkToplevel):
             "notes": self.notes_box.get("0.0", "end").strip(),
             "default_place_id": pid,
             "proxy": self.proxy_entry.get().strip(),
-            "anti_afk": bool(self.anti_afk_var.get()),
         })
         
         c_val = self.cookie_entry.get().strip()
@@ -1377,7 +1362,6 @@ class AccountManagerWindow(ctk.CTkToplevel):
             threading.Thread(target=_log_change, daemon=True).start()
 
         AccountStore.save(self.app.data)
-        self.app.update_anti_afk_state(self.acc)
         self.cb()
         self.destroy()
 
@@ -1400,14 +1384,12 @@ class App(ctk.CTk):
         self.windows = []
         self.active_instances = []
         self.selected_instance_id = None
-        self.anti_afk_flags = {}
+        self.anti_afk_thread_started = False
         
         first_acc = next((a for a in self.data if "cookie" in a), None)
         if first_acc:
             HttpClient.set_cookie(first_acc["cookie"])
-        for acc in self.data:
-            if acc.get("anti_afk"):
-                self.update_anti_afk_state(acc)
+        self.start_anti_afk_loop()
         
         self.grid_columnconfigure(1, weight=1)
         self.grid_rowconfigure(0, weight=1)
@@ -1484,10 +1466,11 @@ class App(ctk.CTk):
         )
         self.tabs.pack(fill="both", expand=True)
         self.tabs.add("Accounts")
+        self.tabs.add("Instances")
         self.tabs.add("Game Tools")
         
-        accounts_tab = self.tabs.tab("Accounts")
-        self.instances_section = CardFrame(accounts_tab, corner_radius=16, height=None)
+        instances_tab = self.tabs.tab("Instances")
+        self.instances_section = CardFrame(instances_tab, corner_radius=16, height=None)
         self.instances_section.pack_propagate(True)
         self.instances_section.pack(fill="x", pady=(10, 6), padx=12)
 
@@ -1550,7 +1533,7 @@ class App(ctk.CTk):
         self.instances_list.pack(fill="x", padx=12, pady=(0, 12))
         
         self.scroll = ctk.CTkScrollableFrame(
-            accounts_tab,
+            self.tabs.tab("Accounts"),
             fg_color="transparent",
             scrollbar_button_color=THEME["border"],
             scrollbar_button_hover_color=THEME["accent"],
@@ -1645,7 +1628,6 @@ class App(ctk.CTk):
             a.setdefault("last_job_id", None)
             a.setdefault("last_webhook_job", None)
             a.setdefault("suppress_next_webhook", False)
-            a.setdefault("anti_afk", False)
         self.render_instances()
         for w in self.scroll.winfo_children(): w.destroy()
         
@@ -1884,6 +1866,10 @@ class App(ctk.CTk):
             "hwnd": None,
             "pending_hide": False,
             "pending_show": False,
+            "anti_afk_enabled": False,
+            "anti_afk_mode": "Jump",
+            "anti_afk_interval": 60,
+            "last_anti_afk": 0,
             "started_at": time.time(),
             "status": "Launching",
         }
@@ -1893,33 +1879,40 @@ class App(ctk.CTk):
         self.render_instances()
         return instance["id"]
 
-    def send_anti_afk_pulse(self, hwnd):
+    def send_anti_afk_pulse(self, hwnd, mode):
         if sys.platform != "win32" or not hwnd:
             return
         user32 = ctypes.windll.user32
-        vk_space = 0x20
-        user32.PostMessageW(hwnd, 0x0100, vk_space, 0)
-        user32.PostMessageW(hwnd, 0x0101, vk_space, 0)
+        if mode == "AD":
+            for vk_key in (0x41, 0x44):
+                user32.PostMessageW(hwnd, 0x0100, vk_key, 0)
+                user32.PostMessageW(hwnd, 0x0101, vk_key, 0)
+        else:
+            vk_space = 0x20
+            user32.PostMessageW(hwnd, 0x0100, vk_space, 0)
+            user32.PostMessageW(hwnd, 0x0101, vk_space, 0)
 
-    def anti_afk_loop(self, username):
-        while self.anti_afk_flags.get(username, False):
-            handles = [i.get("hwnd") for i in self.active_instances if i.get("username") == username and i.get("hwnd")]
-            for hwnd in handles:
-                self.send_anti_afk_pulse(hwnd)
-            time.sleep(60)
+    def anti_afk_loop(self):
+        while True:
+            now = time.time()
+            for instance in self.active_instances:
+                if not instance.get("anti_afk_enabled"):
+                    continue
+                interval = max(10, int(instance.get("anti_afk_interval", 60)))
+                if now - instance.get("last_anti_afk", 0) < interval:
+                    continue
+                hwnd = instance.get("hwnd")
+                if not hwnd:
+                    continue
+                self.send_anti_afk_pulse(hwnd, instance.get("anti_afk_mode", "Jump"))
+                instance["last_anti_afk"] = now
+            time.sleep(1)
 
-    def update_anti_afk_state(self, acc):
-        username = acc.get("username")
-        if not username:
+    def start_anti_afk_loop(self):
+        if self.anti_afk_thread_started:
             return
-        enabled = bool(acc.get("anti_afk"))
-        if not enabled:
-            self.anti_afk_flags[username] = False
-            return
-        if self.anti_afk_flags.get(username):
-            return
-        self.anti_afk_flags[username] = True
-        threading.Thread(target=self.anti_afk_loop, args=(username,), daemon=True).start()
+        self.anti_afk_thread_started = True
+        threading.Thread(target=self.anti_afk_loop, daemon=True).start()
 
     def update_instance_status(self, instance_id, status, pid=None):
         def _update():
@@ -2054,6 +2047,71 @@ class App(ctk.CTk):
                     text_color=THEME["text_sub"],
                 ).pack(side="left")
 
+                anti_row = ctk.CTkFrame(info, fg_color="transparent")
+                anti_row.pack(anchor="w", pady=(4, 0))
+
+                anti_var = ctk.BooleanVar(value=instance.get("anti_afk_enabled", False))
+                anti_switch = ctk.CTkSwitch(
+                    anti_row,
+                    text="Anti-AFK",
+                    variable=anti_var,
+                    fg_color=THEME["card_hover"],
+                    progress_color=THEME["accent"],
+                    button_color=THEME["border"],
+                    button_hover_color=THEME["separator"],
+                    text_color=THEME["text_main"],
+                    width=80,
+                    command=lambda i=instance, v=anti_var: i.update({"anti_afk_enabled": v.get()}),
+                )
+                anti_switch.pack(side="left", padx=(0, 6))
+
+                mode_var = ctk.StringVar(value=instance.get("anti_afk_mode", "Jump"))
+                mode_menu = ctk.CTkOptionMenu(
+                    anti_row,
+                    values=["Jump", "AD"],
+                    variable=mode_var,
+                    width=90,
+                    fg_color=THEME["input_bg"],
+                    button_color=THEME["accent"],
+                    button_hover_color=THEME["accent_hover"],
+                    text_color=THEME["text_main"],
+                    dropdown_text_color=THEME["text_main"],
+                    dropdown_fg_color=THEME["card_bg"],
+                    command=lambda v, i=instance: i.update({"anti_afk_mode": v}),
+                )
+                mode_menu.pack(side="left", padx=(0, 6))
+
+                interval_entry = ctk.CTkEntry(
+                    anti_row,
+                    width=80,
+                    height=24,
+                    fg_color=THEME["input_bg"],
+                    text_color=THEME["text_main"],
+                    border_color=THEME["border"],
+                    border_width=1,
+                    corner_radius=8,
+                )
+                interval_entry.insert(0, str(instance.get("anti_afk_interval", 60)))
+                interval_entry.pack(side="left", padx=(0, 6))
+
+                def apply_interval(target_instance, entry=interval_entry):
+                    try:
+                        value = int(entry.get())
+                    except ValueError:
+                        value = 60
+                    target_instance["anti_afk_interval"] = max(10, value)
+                    entry.delete(0, "end")
+                    entry.insert(0, str(target_instance["anti_afk_interval"]))
+
+                ActionBtn(
+                    anti_row,
+                    text="Set",
+                    width=40,
+                    height=22,
+                    type="subtle",
+                    command=lambda i=instance: apply_interval(i),
+                ).pack(side="left")
+
             ActionBtn(
                 row,
                 text="✕",
@@ -2162,9 +2220,6 @@ class App(ctk.CTk):
         AccountStore.save(self.data)
         self.after(0, self.refresh_ui)
         self.safe_log(f"[SUCCESS] Saved {name}")
-        acc = next((a for a in self.data if a.get("username") == name), None)
-        if acc:
-            self.update_anti_afk_state(acc)
         
     def delete(self, acc): 
         if messagebox.askyesno("Confirm", "Delete?"): self.data.remove(acc); AccountStore.save(self.data); self.refresh_ui()
