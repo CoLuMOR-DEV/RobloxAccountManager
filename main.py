@@ -1481,6 +1481,38 @@ class App(ctk.CTk):
         ).pack(side="left")
         ActionBtn(
             instances_header,
+            text="Hide All",
+            width=70,
+            height=24,
+            type="subtle",
+            command=self.hide_all_instances,
+        ).pack(side="right", padx=(6, 0))
+        ActionBtn(
+            instances_header,
+            text="Show All",
+            width=70,
+            height=24,
+            type="subtle",
+            command=self.show_all_instances,
+        ).pack(side="right", padx=(6, 0))
+        ActionBtn(
+            instances_header,
+            text="Minimize",
+            width=80,
+            height=24,
+            type="subtle",
+            command=self.minimize_all_instances,
+        ).pack(side="right", padx=(6, 0))
+        ActionBtn(
+            instances_header,
+            text="Tile",
+            width=60,
+            height=24,
+            type="subtle",
+            command=self.tile_instance_windows,
+        ).pack(side="right", padx=(6, 0))
+        ActionBtn(
+            instances_header,
             text="Clear",
             width=60,
             height=24,
@@ -1761,6 +1793,52 @@ class App(ctk.CTk):
             return
         ctypes.windll.user32.ShowWindow(instance["hwnd"], 5)
 
+    def hide_all_instances(self):
+        if sys.platform != "win32":
+            return
+        for instance in self.active_instances:
+            if instance.get("hwnd"):
+                ctypes.windll.user32.ShowWindow(instance["hwnd"], 0)
+
+    def show_all_instances(self):
+        if sys.platform != "win32":
+            return
+        for instance in self.active_instances:
+            if instance.get("hwnd"):
+                ctypes.windll.user32.ShowWindow(instance["hwnd"], 5)
+
+    def minimize_all_instances(self):
+        if sys.platform != "win32":
+            return
+        for instance in self.active_instances:
+            if instance.get("hwnd"):
+                ctypes.windll.user32.ShowWindow(instance["hwnd"], 6)
+
+    def tile_instance_windows(self):
+        if sys.platform != "win32":
+            return
+
+        handles = [i.get("hwnd") for i in self.active_instances if i.get("hwnd")]
+        if not handles:
+            return
+
+        count = len(handles)
+        cols = int(count**0.5) or 1
+        rows = (count + cols - 1) // cols
+
+        user32 = ctypes.windll.user32
+        screen_w = user32.GetSystemMetrics(0)
+        screen_h = user32.GetSystemMetrics(1)
+        cell_w = max(200, screen_w // cols)
+        cell_h = max(200, screen_h // rows)
+
+        for index, hwnd in enumerate(handles):
+            row = index // cols
+            col = index % cols
+            x = col * cell_w
+            y = row * cell_h
+            user32.SetWindowPos(hwnd, 0, x, y, cell_w, cell_h, 0x0044)
+
     def add_instance(self, acc, game_name, place_id, job_id):
         instance = {
             "id": str(uuid.uuid4()),
@@ -1812,6 +1890,8 @@ class App(ctk.CTk):
         self.render_instances()
 
     def clear_instances(self):
+        if sys.platform == "win32":
+            subprocess.call("taskkill /F /IM RobloxPlayerBeta.exe", shell=True)
         self.hide_instance_window(self.selected_instance_id)
         self.active_instances.clear()
         self.selected_instance_id = None
