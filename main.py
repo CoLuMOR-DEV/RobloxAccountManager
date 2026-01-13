@@ -1484,19 +1484,19 @@ class App(ctk.CTk):
         ).pack(side="left")
         ActionBtn(
             instances_header,
-            text="Hide All",
-            width=70,
-            height=24,
-            type="subtle",
-            command=self.hide_all_instances,
-        ).pack(side="right", padx=(6, 0))
-        ActionBtn(
-            instances_header,
             text="Scan",
             width=60,
             height=24,
             type="subtle",
             command=self.scan_instances,
+        ).pack(side="right")
+        ActionBtn(
+            instances_header,
+            text="Hide All",
+            width=70,
+            height=24,
+            type="subtle",
+            command=self.hide_all_instances,
         ).pack(side="right", padx=(6, 0))
         ActionBtn(
             instances_header,
