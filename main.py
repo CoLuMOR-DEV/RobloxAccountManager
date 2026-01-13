@@ -1320,6 +1320,20 @@ class AccountManagerWindow(ctk.CTkToplevel):
         self.proxy_entry.insert(0, acc.get("proxy", ""))
         self.proxy_entry.pack(pady=6)
 
+        ctk.CTkLabel(t_data, text="Anti-AFK", text_color=THEME["text_sub"], font=FontService.ui(12, "bold")).pack(pady=(12, 2))
+        self.anti_afk_var = ctk.BooleanVar(value=acc.get("anti_afk", False))
+        self.anti_afk_switch = ctk.CTkSwitch(
+            t_data,
+            text="Enable Anti-AFK",
+            variable=self.anti_afk_var,
+            fg_color=THEME["card_hover"],
+            progress_color=THEME["accent"],
+            button_color=THEME["border"],
+            button_hover_color=THEME["separator"],
+            text_color=THEME["text_main"],
+        )
+        self.anti_afk_switch.pack(pady=(2, 10))
+
         ActionBtn(self, text="Save Changes", type="success", command=self.save).pack(fill="x", padx=18, pady=(0, 16))
         Utils.center_window(self, 440, 600)
 
@@ -1348,7 +1362,8 @@ class AccountManagerWindow(ctk.CTkToplevel):
             "group": self.grp_entry.get(),
             "notes": self.notes_box.get("0.0", "end").strip(),
             "default_place_id": pid,
-            "proxy": self.proxy_entry.get().strip()
+            "proxy": self.proxy_entry.get().strip(),
+            "anti_afk": bool(self.anti_afk_var.get()),
         })
         
         c_val = self.cookie_entry.get().strip()
@@ -1362,6 +1377,7 @@ class AccountManagerWindow(ctk.CTkToplevel):
             threading.Thread(target=_log_change, daemon=True).start()
 
         AccountStore.save(self.app.data)
+        self.app.update_anti_afk_state(self.acc)
         self.cb()
         self.destroy()
 
@@ -1384,10 +1400,14 @@ class App(ctk.CTk):
         self.windows = []
         self.active_instances = []
         self.selected_instance_id = None
+        self.anti_afk_flags = {}
         
         first_acc = next((a for a in self.data if "cookie" in a), None)
         if first_acc:
             HttpClient.set_cookie(first_acc["cookie"])
+        for acc in self.data:
+            if acc.get("anti_afk"):
+                self.update_anti_afk_state(acc)
         
         self.grid_columnconfigure(1, weight=1)
         self.grid_rowconfigure(0, weight=1)
@@ -1563,18 +1583,23 @@ class App(ctk.CTk):
                                 acc["last_known_job"] = new_job
                                 
                                 game_name = p.get("lastLocation", "Unknown Game")
-                                
-                                WebhookService.send_launch_log(
-                                    self.api, 
-                                    acc['username'], 
-                                    game_name, 
-                                    new_place, 
-                                    new_job, 
-                                    uid, 
-                                    manual_track=True, 
-                                    robux=acc.get('robux','0')
-                                )
-                                self.safe_log(f"[TRACK] {acc['username']} moved to {game_name}")
+                                last_webhook_job = acc.get("last_webhook_job")
+                                if acc.get("suppress_next_webhook"):
+                                    acc["suppress_next_webhook"] = False
+                                    acc["last_webhook_job"] = new_job
+                                elif new_job != last_webhook_job:
+                                    acc["last_webhook_job"] = new_job
+                                    WebhookService.send_launch_log(
+                                        self.api, 
+                                        acc['username'], 
+                                        game_name, 
+                                        new_place, 
+                                        new_job, 
+                                        uid, 
+                                        manual_track=True, 
+                                        robux=acc.get('robux','0')
+                                    )
+                                    self.safe_log(f"[TRACK] {acc['username']} moved to {game_name}")
             
             time.sleep(10)
 
@@ -1618,6 +1643,9 @@ class App(ctk.CTk):
         for a in self.data:
             a.setdefault("locked", False)
             a.setdefault("last_job_id", None)
+            a.setdefault("last_webhook_job", None)
+            a.setdefault("suppress_next_webhook", False)
+            a.setdefault("anti_afk", False)
         self.render_instances()
         for w in self.scroll.winfo_children(): w.destroy()
         
@@ -1781,7 +1809,10 @@ class App(ctk.CTk):
         if sys.platform != "win32" or not instance_id:
             return
         instance = next((i for i in self.active_instances if i["id"] == instance_id), None)
-        if not instance or not instance.get("hwnd"):
+        if not instance:
+            return
+        if not instance.get("hwnd"):
+            instance["pending_hide"] = True
             return
         ctypes.windll.user32.ShowWindow(instance["hwnd"], 0)
 
@@ -1789,7 +1820,10 @@ class App(ctk.CTk):
         if sys.platform != "win32" or not instance_id:
             return
         instance = next((i for i in self.active_instances if i["id"] == instance_id), None)
-        if not instance or not instance.get("hwnd"):
+        if not instance:
+            return
+        if not instance.get("hwnd"):
+            instance["pending_show"] = True
             return
         ctypes.windll.user32.ShowWindow(instance["hwnd"], 5)
 
@@ -1848,6 +1882,8 @@ class App(ctk.CTk):
             "job_id": job_id,
             "pid": "Pending",
             "hwnd": None,
+            "pending_hide": False,
+            "pending_show": False,
             "started_at": time.time(),
             "status": "Launching",
         }
@@ -1857,6 +1893,34 @@ class App(ctk.CTk):
         self.render_instances()
         return instance["id"]
 
+    def send_anti_afk_pulse(self, hwnd):
+        if sys.platform != "win32" or not hwnd:
+            return
+        user32 = ctypes.windll.user32
+        vk_space = 0x20
+        user32.PostMessageW(hwnd, 0x0100, vk_space, 0)
+        user32.PostMessageW(hwnd, 0x0101, vk_space, 0)
+
+    def anti_afk_loop(self, username):
+        while self.anti_afk_flags.get(username, False):
+            handles = [i.get("hwnd") for i in self.active_instances if i.get("username") == username and i.get("hwnd")]
+            for hwnd in handles:
+                self.send_anti_afk_pulse(hwnd)
+            time.sleep(60)
+
+    def update_anti_afk_state(self, acc):
+        username = acc.get("username")
+        if not username:
+            return
+        enabled = bool(acc.get("anti_afk"))
+        if not enabled:
+            self.anti_afk_flags[username] = False
+            return
+        if self.anti_afk_flags.get(username):
+            return
+        self.anti_afk_flags[username] = True
+        threading.Thread(target=self.anti_afk_loop, args=(username,), daemon=True).start()
+
     def update_instance_status(self, instance_id, status, pid=None):
         def _update():
             for instance in self.active_instances:
@@ -1865,6 +1929,12 @@ class App(ctk.CTk):
                     if pid:
                         instance["pid"] = pid
                         instance["hwnd"] = self.get_window_handle_for_pid(pid)
+                        if instance.get("pending_hide"):
+                            ctypes.windll.user32.ShowWindow(instance["hwnd"], 0)
+                            instance["pending_hide"] = False
+                        if instance.get("pending_show"):
+                            ctypes.windll.user32.ShowWindow(instance["hwnd"], 5)
+                            instance["pending_show"] = False
                     elif status != "Launching" and instance.get("pid") == "Pending":
                         instance["pid"] = "N/A"
                     instance["updated_at"] = time.time()
@@ -2049,10 +2119,12 @@ class App(ctk.CTk):
             acc["last_job_id"] = job
             acc["last_known_job"] = job 
             game_name = acc.get('last_played_name', 'Unknown Game')
+            acc["last_webhook_job"] = job
         else:
              game_name = self.api.get_game_name(pid)
              acc['last_played_name'] = game_name
              acc['game_id'] = pid
+             acc["suppress_next_webhook"] = True
              
         AccountStore.save(self.data)
         self.refresh_ui()
@@ -2090,6 +2162,9 @@ class App(ctk.CTk):
         AccountStore.save(self.data)
         self.after(0, self.refresh_ui)
         self.safe_log(f"[SUCCESS] Saved {name}")
+        acc = next((a for a in self.data if a.get("username") == name), None)
+        if acc:
+            self.update_anti_afk_state(acc)
         
     def delete(self, acc): 
         if messagebox.askyesno("Confirm", "Delete?"): self.data.remove(acc); AccountStore.save(self.data); self.refresh_ui()
