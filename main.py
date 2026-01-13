@@ -1940,6 +1940,7 @@ class App(ctk.CTk):
             "anti_afk_enabled": False,
             "anti_afk_mode": "Jump",
             "anti_afk_interval_minutes": 1,
+            "anti_afk_restore_foreground": True,
             "last_anti_afk": 0,
             "started_at": time.time(),
             "status": "Launching",
@@ -1964,6 +1965,7 @@ class App(ctk.CTk):
             "anti_afk_enabled": False,
             "anti_afk_mode": "Jump",
             "anti_afk_interval_minutes": 1,
+            "anti_afk_restore_foreground": True,
             "last_anti_afk": 0,
             "started_at": time.time(),
             "status": "Running",
@@ -1979,7 +1981,7 @@ class App(ctk.CTk):
             self.selected_instance_id = self.active_instances[0]["id"]
         self.render_instances()
 
-    def send_anti_afk_pulse(self, hwnd, mode):
+    def send_anti_afk_pulse(self, hwnd, mode, restore_foreground):
         if sys.platform != "win32" or not hwnd:
             return
         user32 = ctypes.windll.user32
@@ -1997,7 +1999,7 @@ class App(ctk.CTk):
             user32.PostMessageW(hwnd, 0x0100, vk_space, 0)
             time.sleep(0.1)
             user32.PostMessageW(hwnd, 0x0101, vk_space, 0)
-        if previous_hwnd:
+        if restore_foreground and previous_hwnd:
             user32.SetForegroundWindow(previous_hwnd)
 
     def anti_afk_loop(self):
@@ -2022,6 +2024,15 @@ class App(ctk.CTk):
                 if not instance.get("hwnd") and isinstance(pid, int):
                     instance["hwnd"] = self.get_window_handle_for_pid(pid)
 
+                hwnd = instance.get("hwnd")
+                if not hwnd:
+                    continue
+
+                self.send_anti_afk_pulse(
+                    hwnd,
+                    instance.get("anti_afk_mode", "Jump"),
+                    instance.get("anti_afk_restore_foreground", True),
+                )
                 instance["last_anti_afk"] = now
                 self.safe_log(
                     f"[AntiAFK] Tick for {instance.get('username')} (mode={instance.get('anti_afk_mode')}, every {interval_minutes}m)"
@@ -2240,6 +2251,24 @@ class App(ctk.CTk):
                     command=lambda v, i=instance: i.update({"anti_afk_mode": v}),
                 )
                 mode_menu.pack(side="left", padx=(0, 6))
+
+                focus_var = ctk.StringVar(
+                    value="Restore" if instance.get("anti_afk_restore_foreground", True) else "Keep"
+                )
+                focus_menu = ctk.CTkOptionMenu(
+                    anti_row,
+                    values=["Restore", "Keep"],
+                    variable=focus_var,
+                    width=100,
+                    fg_color=THEME["input_bg"],
+                    button_color=THEME["accent"],
+                    button_hover_color=THEME["accent_hover"],
+                    text_color=THEME["text_main"],
+                    dropdown_text_color=THEME["text_main"],
+                    dropdown_fg_color=THEME["card_bg"],
+                    command=lambda v, i=instance: i.update({"anti_afk_restore_foreground": v == "Restore"}),
+                )
+                focus_menu.pack(side="left", padx=(0, 6))
 
                 ctk.CTkLabel(
                     anti_row,
