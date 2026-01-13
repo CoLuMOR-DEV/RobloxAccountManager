@@ -1991,16 +1991,42 @@ class App(ctk.CTk):
         time.sleep(0.1)
         if mode == "AD":
             for vk_key in (0x41, 0x44):
-                user32.PostMessageW(hwnd, 0x0100, vk_key, 0)
+                self.send_virtual_key(vk_key)
                 time.sleep(0.1)
-                user32.PostMessageW(hwnd, 0x0101, vk_key, 0)
         else:
             vk_space = 0x20
-            user32.PostMessageW(hwnd, 0x0100, vk_space, 0)
-            time.sleep(0.1)
-            user32.PostMessageW(hwnd, 0x0101, vk_space, 0)
+            self.send_virtual_key(vk_space)
         if restore_foreground and previous_hwnd:
             user32.SetForegroundWindow(previous_hwnd)
+
+    def send_virtual_key(self, vk_key):
+        if sys.platform != "win32":
+            return
+        user32 = ctypes.windll.user32
+
+        class KEYBDINPUT(ctypes.Structure):
+            _fields_ = [
+                ("wVk", wintypes.WORD),
+                ("wScan", wintypes.WORD),
+                ("dwFlags", wintypes.DWORD),
+                ("time", wintypes.DWORD),
+                ("dwExtraInfo", ctypes.POINTER(ctypes.c_ulong)),
+            ]
+
+        class INPUT(ctypes.Structure):
+            _fields_ = [("type", wintypes.DWORD), ("ki", KEYBDINPUT)]
+
+        extra = ctypes.c_ulong(0)
+        key_down = INPUT(
+            type=1,
+            ki=KEYBDINPUT(wVk=vk_key, wScan=0, dwFlags=0, time=0, dwExtraInfo=ctypes.pointer(extra)),
+        )
+        key_up = INPUT(
+            type=1,
+            ki=KEYBDINPUT(wVk=vk_key, wScan=0, dwFlags=2, time=0, dwExtraInfo=ctypes.pointer(extra)),
+        )
+        user32.SendInput(1, ctypes.byref(key_down), ctypes.sizeof(INPUT))
+        user32.SendInput(1, ctypes.byref(key_up), ctypes.sizeof(INPUT))
 
     def anti_afk_loop(self):
         while True:
