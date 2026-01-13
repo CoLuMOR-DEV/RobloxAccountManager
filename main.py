@@ -1364,6 +1364,147 @@ class AccountManagerWindow(ctk.CTkToplevel):
         self.destroy()
 
 
+class InstanceWindow(ctk.CTkToplevel):
+    def __init__(self, app, acc, game_name, place_id, job_id):
+        super().__init__(app)
+        self.app = app
+        self.acc = acc
+        self.game_name = game_name or "Unknown Game"
+        self.place_id = place_id or "Unknown"
+        self.job_id = job_id
+        self.sidebar_expanded = True
+
+        self.title(f"Instance • {acc.get('username', 'Unknown')}")
+        self.configure(fg_color=THEME["bg"])
+        self.geometry("980x680")
+
+        self.grid_columnconfigure(0, weight=1)
+        self.grid_rowconfigure(0, weight=1)
+
+        self.tabs = ctk.CTkTabview(
+            self,
+            fg_color="transparent",
+            segmented_button_fg_color=THEME["card_bg"],
+            segmented_button_selected_color=THEME["accent"],
+            segmented_button_selected_hover_color=THEME["accent_hover"],
+            segmented_button_unselected_color=THEME["card_bg"],
+            segmented_button_unselected_hover_color=THEME["card_hover"],
+            text_color=THEME["text_main"],
+        )
+        self.tabs.grid(row=0, column=0, sticky="nsew", padx=16, pady=16)
+        self.tabs.add("Instance")
+
+        container = ctk.CTkFrame(self.tabs.tab("Instance"), fg_color="transparent")
+        container.pack(fill="both", expand=True)
+        container.grid_columnconfigure(1, weight=1)
+        container.grid_rowconfigure(0, weight=1)
+
+        self.sidebar = ctk.CTkFrame(
+            container,
+            width=220,
+            fg_color=THEME["card_bg"],
+            border_width=1,
+            border_color=THEME["border"],
+            corner_radius=14,
+        )
+        self.sidebar.grid(row=0, column=0, sticky="nsew", padx=(0, 12))
+        self.sidebar.grid_propagate(False)
+
+        header = ctk.CTkFrame(self.sidebar, fg_color="transparent")
+        header.pack(fill="x", padx=12, pady=(12, 8))
+        ctk.CTkLabel(
+            header,
+            text="Settings",
+            font=FontService.ui(12, "bold"),
+            text_color=THEME["text_main"],
+        ).pack(side="left")
+        ActionBtn(
+            header,
+            text="⟷",
+            width=28,
+            height=24,
+            type="subtle",
+            command=self.toggle_sidebar,
+        ).pack(side="right")
+
+        self.settings_body = ctk.CTkFrame(self.sidebar, fg_color="transparent")
+        self.settings_body.pack(fill="both", expand=True, padx=12, pady=(0, 12))
+
+        self.status_label = ctk.CTkLabel(
+            self.settings_body,
+            text="Status: Launching",
+            font=FontService.ui(11, "bold"),
+            text_color=THEME["warning"],
+        )
+        self.status_label.pack(anchor="w", pady=(0, 8))
+
+        ctk.CTkLabel(
+            self.settings_body,
+            text=f"Account: {acc.get('username', 'Unknown')}",
+            font=FontService.ui(11),
+            text_color=THEME["text_sub"],
+        ).pack(anchor="w", pady=2)
+        ctk.CTkLabel(
+            self.settings_body,
+            text=f"Game: {self.game_name}",
+            font=FontService.ui(11),
+            text_color=THEME["text_sub"],
+        ).pack(anchor="w", pady=2)
+        ctk.CTkLabel(
+            self.settings_body,
+            text=f"Place ID: {self.place_id}",
+            font=FontService.ui(11),
+            text_color=THEME["text_sub"],
+        ).pack(anchor="w", pady=2)
+        if self.job_id:
+            ctk.CTkLabel(
+                self.settings_body,
+                text=f"Job ID: {self.job_id}",
+                font=FontService.ui(11),
+                text_color=THEME["text_sub"],
+            ).pack(anchor="w", pady=2)
+
+        self.canvas_frame = ctk.CTkFrame(
+            container,
+            fg_color=THEME["card_bg"],
+            border_width=1,
+            border_color=THEME["border"],
+            corner_radius=18,
+        )
+        self.canvas_frame.grid(row=0, column=1, sticky="nsew")
+        self.canvas_frame.grid_columnconfigure(0, weight=1)
+        self.canvas_frame.grid_rowconfigure(0, weight=1)
+
+        ctk.CTkLabel(
+            self.canvas_frame,
+            text="Roblox is running in a separate window.\nUse this panel to keep instances organized.",
+            font=FontService.ui(13),
+            text_color=THEME["text_sub"],
+            justify="center",
+        ).grid(row=0, column=0, sticky="nsew", padx=24, pady=24)
+
+        Utils.center_window(self, 980, 680)
+
+    def toggle_sidebar(self):
+        if self.sidebar_expanded:
+            self.sidebar.configure(width=52)
+            for widget in self.settings_body.winfo_children():
+                widget.pack_forget()
+            self.settings_body.pack_forget()
+            self.sidebar_expanded = False
+        else:
+            self.sidebar.configure(width=220)
+            self.settings_body.pack(fill="both", expand=True, padx=12, pady=(0, 12))
+            self.status_label.pack(anchor="w", pady=(0, 8))
+            for widget in self.settings_body.winfo_children():
+                if widget is not self.status_label:
+                    widget.pack(anchor="w", pady=2)
+            self.sidebar_expanded = True
+
+    def update_status(self, status, color):
+        self.status_label.configure(text=f"Status: {status}", text_color=color)
+
+
 class App(ctk.CTk):
     def __init__(self):
         super().__init__()
@@ -1380,7 +1521,7 @@ class App(ctk.CTk):
         self.browser = WebAutomation(self.safe_log)
         self.data = AccountStore.load()
         self.windows = []
-        self.active_instances = []
+        self.instance_windows = []
         
         first_acc = next((a for a in self.data if "cookie" in a), None)
         if first_acc:
@@ -1462,40 +1603,9 @@ class App(ctk.CTk):
         self.tabs.pack(fill="both", expand=True)
         self.tabs.add("Accounts")
         self.tabs.add("Game Tools")
-
-        accounts_tab = self.tabs.tab("Accounts")
-        self.instances_section = CardFrame(accounts_tab, corner_radius=18, height=None)
-        self.instances_section.pack_propagate(True)
-        self.instances_section.pack(fill="x", pady=(10, 6), padx=12)
-
-        instances_header = ctk.CTkFrame(self.instances_section, fg_color="transparent")
-        instances_header.pack(fill="x", padx=16, pady=(14, 6))
-        ctk.CTkLabel(
-            instances_header,
-            text="Instances",
-            font=FontService.ui(12, "bold"),
-            text_color=THEME["text_main"],
-        ).pack(side="left")
-        ActionBtn(
-            instances_header,
-            text="Clear",
-            width=60,
-            height=24,
-            type="subtle",
-            command=self.clear_instances,
-        ).pack(side="right")
-
-        self.instances_list = ctk.CTkScrollableFrame(
-            self.instances_section,
-            height=150,
-            fg_color="transparent",
-            scrollbar_button_color=THEME["border"],
-            scrollbar_button_hover_color=THEME["accent"],
-        )
-        self.instances_list.pack(fill="x", padx=14, pady=(0, 14))
-
+        
         self.scroll = ctk.CTkScrollableFrame(
-            accounts_tab,
+            self.tabs.tab("Accounts"),
             fg_color="transparent",
             scrollbar_button_color=THEME["border"],
             scrollbar_button_hover_color=THEME["accent"],
@@ -1583,8 +1693,6 @@ class App(ctk.CTk):
         for a in self.data:
             a.setdefault("locked", False)
             a.setdefault("last_job_id", None)
-
-        self.render_instances()
         for w in self.scroll.winfo_children(): w.destroy()
         
         self.scroll._parent_canvas.yview_moveto(0)
@@ -1690,126 +1798,6 @@ class App(ctk.CTk):
         ActionBtn(actions, text="⚙", width=30, height=24, type="subtle", command=lambda: self.show_menu(acc)).pack(side="left", padx=3)
         ActionBtn(actions, text="🗑", width=30, height=24, type="danger", command=lambda: self.delete(acc)).pack(side="left", padx=3)
 
-    def add_instance(self, acc, game_name, place_id, job_id):
-        instance = {
-            "id": str(uuid.uuid4()),
-            "username": acc.get("username", "Unknown"),
-            "game_name": game_name,
-            "place_id": place_id,
-            "job_id": job_id,
-            "started_at": time.time(),
-            "status": "Launching",
-        }
-        self.active_instances.insert(0, instance)
-        self.render_instances()
-        return instance["id"]
-
-    def update_instance_status(self, instance_id, status):
-        def _update():
-            for instance in self.active_instances:
-                if instance["id"] == instance_id:
-                    instance["status"] = status
-                    instance["updated_at"] = time.time()
-                    break
-            self.render_instances()
-        self.after(0, _update)
-
-    def remove_instance(self, instance_id):
-        self.active_instances = [i for i in self.active_instances if i["id"] != instance_id]
-        self.render_instances()
-
-    def clear_instances(self):
-        self.active_instances.clear()
-        self.render_instances()
-
-    def render_instances(self):
-        if not hasattr(self, "instances_list"):
-            return
-
-        for w in self.instances_list.winfo_children():
-            w.destroy()
-
-        if not self.active_instances:
-            ctk.CTkLabel(
-                self.instances_list,
-                text="No active instances yet.",
-                font=FontService.ui(11),
-                text_color=THEME["text_sub"],
-            ).pack(anchor="w", padx=6, pady=6)
-            return
-
-        status_palette = {
-            "Launching": THEME["warning"],
-            "Running": THEME["success"],
-            "Failed": THEME["danger"],
-        }
-
-        for instance in self.active_instances:
-            row = ctk.CTkFrame(
-                self.instances_list,
-                fg_color=THEME["card_bg"],
-                corner_radius=12,
-                border_width=1,
-                border_color=THEME["border"],
-            )
-            row.pack(fill="x", pady=4, padx=2)
-
-            info = ctk.CTkFrame(row, fg_color="transparent")
-            info.pack(side="left", fill="both", expand=True, padx=10, pady=6)
-
-            title_row = ctk.CTkFrame(info, fg_color="transparent")
-            title_row.pack(anchor="w")
-
-            status_text = instance.get("status", "Unknown")
-            status_color = status_palette.get(status_text, THEME["text_sub"])
-
-            ctk.CTkLabel(
-                title_row,
-                text=instance.get("username", "Unknown"),
-                font=FontService.ui(12, "bold"),
-                text_color=THEME["text_main"],
-            ).pack(side="left")
-            ctk.CTkLabel(
-                title_row,
-                text=f" • {status_text}",
-                font=FontService.ui(11),
-                text_color=status_color,
-            ).pack(side="left")
-
-            sub_row = ctk.CTkFrame(info, fg_color="transparent")
-            sub_row.pack(anchor="w")
-
-            game_name = instance.get("game_name") or "Unknown Game"
-            place_id = instance.get("place_id") or "Unknown"
-            job_id = instance.get("job_id")
-            details = f"{game_name} • Place {place_id}"
-            if job_id:
-                details = f"{details} • Job {job_id}"
-
-            ctk.CTkLabel(
-                sub_row,
-                text=details,
-                font=FontService.ui(10),
-                text_color=THEME["text_sub"],
-            ).pack(side="left")
-
-            started = Utils.time_ago(instance.get("started_at"))
-            ctk.CTkLabel(
-                sub_row,
-                text=f" • {started}",
-                font=FontService.ui(10),
-                text_color=THEME["text_sub"],
-            ).pack(side="left")
-
-            ActionBtn(
-                row,
-                text="✕",
-                width=28,
-                height=24,
-                type="subtle",
-                command=lambda i=instance["id"]: self.remove_instance(i),
-            ).pack(side="right", padx=8, pady=6)
-
     def show_menu(self, acc):
         global parent
         parent = self
@@ -1879,17 +1867,18 @@ class App(ctk.CTk):
         AccountStore.save(self.data)
         self.refresh_ui()
         WebhookService.send_launch_log(self.api, acc['username'], game_name, pid, job, acc.get('userid'), manual_track=False, robux=acc.get('robux','0'), server_info=server_info)
-        instance_id = self.add_instance(acc, game_name, pid, job)
-        threading.Thread(target=self._launch_t, args=(acc, pid, job, instance_id), daemon=True).start()
+        instance_window = InstanceWindow(self, acc, game_name, pid, job)
+        self.instance_windows.append(instance_window)
+        threading.Thread(target=self._launch_t, args=(acc, pid, job, instance_window), daemon=True).start()
         
-    def _launch_t(self, acc, pid, job, instance_id):
+    def _launch_t(self, acc, pid, job, instance_window):
         res = self.api.launch(acc, pid, acc.get('user_agent'), job, acc.get('proxy'))
         if res is True or "Fishstrap" in str(res) or "Bloxstrap" in str(res):
             self.safe_log(f"[SUCCESS] Launched {acc['username']}")
-            self.update_instance_status(instance_id, "Running")
+            self.after(0, lambda: instance_window.update_status("Running", THEME["success"]))
         else: 
             self.safe_log(f"[ERROR] Launch Error: {res}")
-            self.update_instance_status(instance_id, "Failed")
+            self.after(0, lambda: instance_window.update_status("Failed", THEME["danger"]))
         
     def login(self, acc): 
         threading.Thread(target=self.browser.open, args=(acc['username'], CryptoUtil.decrypt(acc.get('password')), acc.get('cookie'), "https://www.roblox.com/home", self.update_acc, "LOGIN_ONLY", acc.get('proxy')), daemon=True).start()
