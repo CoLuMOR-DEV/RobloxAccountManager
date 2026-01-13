@@ -1492,6 +1492,14 @@ class App(ctk.CTk):
         ).pack(side="right", padx=(6, 0))
         ActionBtn(
             instances_header,
+            text="Scan",
+            width=60,
+            height=24,
+            type="subtle",
+            command=self.scan_instances,
+        ).pack(side="right", padx=(6, 0))
+        ActionBtn(
+            instances_header,
             text="Show All",
             width=70,
             height=24,
@@ -1785,6 +1793,47 @@ class App(ctk.CTk):
             pids.append(int(pid))
         return max(pids) if pids else None
 
+    def get_roblox_pids(self):
+        if sys.platform != "win32":
+            return []
+        try:
+            output = subprocess.check_output(
+                [
+                    "powershell",
+                    "-NoProfile",
+                    "-Command",
+                    "Get-Process RobloxPlayerBeta | Select-Object -ExpandProperty Id",
+                ],
+                text=True,
+                encoding="utf-8",
+                errors="ignore",
+            )
+            pids = [int(line.strip()) for line in output.splitlines() if line.strip().isdigit()]
+            if pids:
+                return pids
+        except Exception:
+            pass
+        try:
+            output = subprocess.check_output(
+                ["tasklist", "/FI", "IMAGENAME eq RobloxPlayerBeta.exe", "/FO", "CSV", "/NH"],
+                text=True,
+                encoding="utf-8",
+                errors="ignore",
+            )
+        except Exception:
+            return []
+        pids = []
+        for line in output.splitlines():
+            if not line.strip():
+                continue
+            parts = [p.strip().strip('"') for p in line.split('","')]
+            if len(parts) < 2:
+                continue
+            pid = parts[1].strip('"')
+            if pid.isdigit():
+                pids.append(int(pid))
+        return pids
+
     def get_window_handle_for_pid(self, pid):
         if sys.platform != "win32" or not pid:
             return None
@@ -1901,6 +1950,35 @@ class App(ctk.CTk):
         self.render_instances()
         return instance["id"]
 
+    def add_scanned_instance(self, pid):
+        instance = {
+            "id": str(uuid.uuid4()),
+            "username": "Unknown",
+            "game_name": "Unknown Game",
+            "place_id": "Unknown",
+            "job_id": None,
+            "pid": pid,
+            "hwnd": self.get_window_handle_for_pid(pid),
+            "pending_hide": False,
+            "pending_show": False,
+            "anti_afk_enabled": False,
+            "anti_afk_mode": "Jump",
+            "anti_afk_interval_minutes": 1,
+            "last_anti_afk": 0,
+            "started_at": time.time(),
+            "status": "Running",
+        }
+        self.active_instances.insert(0, instance)
+
+    def scan_instances(self):
+        pids = set(self.get_roblox_pids())
+        tracked_pids = {i.get("pid") for i in self.active_instances if isinstance(i.get("pid"), int)}
+        for pid in sorted(pids - tracked_pids, reverse=True):
+            self.add_scanned_instance(pid)
+        if self.active_instances and not self.selected_instance_id:
+            self.selected_instance_id = self.active_instances[0]["id"]
+        self.render_instances()
+
     def send_anti_afk_pulse(self, hwnd, mode):
         if sys.platform != "win32" or not hwnd:
             return
@@ -1948,6 +2026,7 @@ class App(ctk.CTk):
                 self.safe_log(
                     f"[AntiAFK] Tick for {instance.get('username')} (mode={instance.get('anti_afk_mode')}, every {interval_minutes}m)"
                 )
+            self.cleanup_instances()
             time.sleep(1)
 
     def start_anti_afk_loop(self):
@@ -1970,6 +2049,21 @@ class App(ctk.CTk):
             return exit_code.value == 259
         except Exception:
             return False
+
+    def cleanup_instances(self):
+        removed = False
+        for instance in list(self.active_instances):
+            pid = instance.get("pid")
+            if isinstance(pid, int) and not self._pid_alive(pid):
+                self.active_instances.remove(instance)
+                removed = True
+        if removed:
+            if self.active_instances:
+                if self.selected_instance_id not in {i["id"] for i in self.active_instances}:
+                    self.selected_instance_id = self.active_instances[0]["id"]
+            else:
+                self.selected_instance_id = None
+            self.after(0, self.render_instances)
 
     def resolve_instance_pid(self, instance_id):
         for _ in range(12):
