@@ -1380,6 +1380,7 @@ class App(ctk.CTk):
         self.browser = WebAutomation(self.safe_log)
         self.data = AccountStore.load()
         self.windows = []
+        self.active_instances = []
         
         first_acc = next((a for a in self.data if "cookie" in a), None)
         if first_acc:
@@ -1461,9 +1462,40 @@ class App(ctk.CTk):
         self.tabs.pack(fill="both", expand=True)
         self.tabs.add("Accounts")
         self.tabs.add("Game Tools")
-        
+
+        accounts_tab = self.tabs.tab("Accounts")
+        self.instances_section = CardFrame(accounts_tab, corner_radius=18, height=None)
+        self.instances_section.pack_propagate(True)
+        self.instances_section.pack(fill="x", pady=(10, 6), padx=12)
+
+        instances_header = ctk.CTkFrame(self.instances_section, fg_color="transparent")
+        instances_header.pack(fill="x", padx=16, pady=(14, 6))
+        ctk.CTkLabel(
+            instances_header,
+            text="Instances",
+            font=FontService.ui(12, "bold"),
+            text_color=THEME["text_main"],
+        ).pack(side="left")
+        ActionBtn(
+            instances_header,
+            text="Clear",
+            width=60,
+            height=24,
+            type="subtle",
+            command=self.clear_instances,
+        ).pack(side="right")
+
+        self.instances_list = ctk.CTkScrollableFrame(
+            self.instances_section,
+            height=150,
+            fg_color="transparent",
+            scrollbar_button_color=THEME["border"],
+            scrollbar_button_hover_color=THEME["accent"],
+        )
+        self.instances_list.pack(fill="x", padx=14, pady=(0, 14))
+
         self.scroll = ctk.CTkScrollableFrame(
-            self.tabs.tab("Accounts"),
+            accounts_tab,
             fg_color="transparent",
             scrollbar_button_color=THEME["border"],
             scrollbar_button_hover_color=THEME["accent"],
@@ -1551,7 +1583,8 @@ class App(ctk.CTk):
         for a in self.data:
             a.setdefault("locked", False)
             a.setdefault("last_job_id", None)
-            
+
+        self.render_instances()
         for w in self.scroll.winfo_children(): w.destroy()
         
         self.scroll._parent_canvas.yview_moveto(0)
@@ -1657,6 +1690,126 @@ class App(ctk.CTk):
         ActionBtn(actions, text="⚙", width=30, height=24, type="subtle", command=lambda: self.show_menu(acc)).pack(side="left", padx=3)
         ActionBtn(actions, text="🗑", width=30, height=24, type="danger", command=lambda: self.delete(acc)).pack(side="left", padx=3)
 
+    def add_instance(self, acc, game_name, place_id, job_id):
+        instance = {
+            "id": str(uuid.uuid4()),
+            "username": acc.get("username", "Unknown"),
+            "game_name": game_name,
+            "place_id": place_id,
+            "job_id": job_id,
+            "started_at": time.time(),
+            "status": "Launching",
+        }
+        self.active_instances.insert(0, instance)
+        self.render_instances()
+        return instance["id"]
+
+    def update_instance_status(self, instance_id, status):
+        def _update():
+            for instance in self.active_instances:
+                if instance["id"] == instance_id:
+                    instance["status"] = status
+                    instance["updated_at"] = time.time()
+                    break
+            self.render_instances()
+        self.after(0, _update)
+
+    def remove_instance(self, instance_id):
+        self.active_instances = [i for i in self.active_instances if i["id"] != instance_id]
+        self.render_instances()
+
+    def clear_instances(self):
+        self.active_instances.clear()
+        self.render_instances()
+
+    def render_instances(self):
+        if not hasattr(self, "instances_list"):
+            return
+
+        for w in self.instances_list.winfo_children():
+            w.destroy()
+
+        if not self.active_instances:
+            ctk.CTkLabel(
+                self.instances_list,
+                text="No active instances yet.",
+                font=FontService.ui(11),
+                text_color=THEME["text_sub"],
+            ).pack(anchor="w", padx=6, pady=6)
+            return
+
+        status_palette = {
+            "Launching": THEME["warning"],
+            "Running": THEME["success"],
+            "Failed": THEME["danger"],
+        }
+
+        for instance in self.active_instances:
+            row = ctk.CTkFrame(
+                self.instances_list,
+                fg_color=THEME["card_bg"],
+                corner_radius=12,
+                border_width=1,
+                border_color=THEME["border"],
+            )
+            row.pack(fill="x", pady=4, padx=2)
+
+            info = ctk.CTkFrame(row, fg_color="transparent")
+            info.pack(side="left", fill="both", expand=True, padx=10, pady=6)
+
+            title_row = ctk.CTkFrame(info, fg_color="transparent")
+            title_row.pack(anchor="w")
+
+            status_text = instance.get("status", "Unknown")
+            status_color = status_palette.get(status_text, THEME["text_sub"])
+
+            ctk.CTkLabel(
+                title_row,
+                text=instance.get("username", "Unknown"),
+                font=FontService.ui(12, "bold"),
+                text_color=THEME["text_main"],
+            ).pack(side="left")
+            ctk.CTkLabel(
+                title_row,
+                text=f" • {status_text}",
+                font=FontService.ui(11),
+                text_color=status_color,
+            ).pack(side="left")
+
+            sub_row = ctk.CTkFrame(info, fg_color="transparent")
+            sub_row.pack(anchor="w")
+
+            game_name = instance.get("game_name") or "Unknown Game"
+            place_id = instance.get("place_id") or "Unknown"
+            job_id = instance.get("job_id")
+            details = f"{game_name} • Place {place_id}"
+            if job_id:
+                details = f"{details} • Job {job_id}"
+
+            ctk.CTkLabel(
+                sub_row,
+                text=details,
+                font=FontService.ui(10),
+                text_color=THEME["text_sub"],
+            ).pack(side="left")
+
+            started = Utils.time_ago(instance.get("started_at"))
+            ctk.CTkLabel(
+                sub_row,
+                text=f" • {started}",
+                font=FontService.ui(10),
+                text_color=THEME["text_sub"],
+            ).pack(side="left")
+
+            ActionBtn(
+                row,
+                text="✕",
+                width=28,
+                height=24,
+                type="subtle",
+                command=lambda i=instance["id"]: self.remove_instance(i),
+            ).pack(side="right", padx=8, pady=6)
+
     def show_menu(self, acc):
         global parent
         parent = self
@@ -1726,14 +1879,17 @@ class App(ctk.CTk):
         AccountStore.save(self.data)
         self.refresh_ui()
         WebhookService.send_launch_log(self.api, acc['username'], game_name, pid, job, acc.get('userid'), manual_track=False, robux=acc.get('robux','0'), server_info=server_info)
-        threading.Thread(target=self._launch_t, args=(acc, pid, job), daemon=True).start()
+        instance_id = self.add_instance(acc, game_name, pid, job)
+        threading.Thread(target=self._launch_t, args=(acc, pid, job, instance_id), daemon=True).start()
         
-    def _launch_t(self, acc, pid, job):
+    def _launch_t(self, acc, pid, job, instance_id):
         res = self.api.launch(acc, pid, acc.get('user_agent'), job, acc.get('proxy'))
-        if res is True or "Fishstrap" in str(res) or "Bloxstrap" in str(res): 
+        if res is True or "Fishstrap" in str(res) or "Bloxstrap" in str(res):
             self.safe_log(f"[SUCCESS] Launched {acc['username']}")
+            self.update_instance_status(instance_id, "Running")
         else: 
             self.safe_log(f"[ERROR] Launch Error: {res}")
+            self.update_instance_status(instance_id, "Failed")
         
     def login(self, acc): 
         threading.Thread(target=self.browser.open, args=(acc['username'], CryptoUtil.decrypt(acc.get('password')), acc.get('cookie'), "https://www.roblox.com/home", self.update_acc, "LOGIN_ONLY", acc.get('proxy')), daemon=True).start()
