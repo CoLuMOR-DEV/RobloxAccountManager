@@ -11,6 +11,8 @@ import webbrowser
 import shutil
 import subprocess
 import random
+import ctypes
+from ctypes import wintypes
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
 from io import BytesIO
@@ -1488,7 +1490,7 @@ class App(ctk.CTk):
 
         self.instances_list = ctk.CTkScrollableFrame(
             self.instances_section,
-            height=120,
+            height=100,
             fg_color="transparent",
             scrollbar_button_color=THEME["border"],
             scrollbar_button_hover_color=THEME["accent"],
@@ -1695,6 +1697,70 @@ class App(ctk.CTk):
         parent = self
         AccountManagerWindow(self, acc, lambda: self.refresh_ui(), self.api, self)
 
+    def get_latest_roblox_pid(self):
+        if sys.platform != "win32":
+            return None
+
+        existing = {str(i.get("pid")) for i in self.active_instances if i.get("pid") not in (None, "Pending", "N/A")}
+        try:
+            output = subprocess.check_output(
+                ["tasklist", "/FI", "IMAGENAME eq RobloxPlayerBeta.exe", "/FO", "CSV", "/NH"],
+                text=True,
+                encoding="utf-8",
+                errors="ignore",
+            )
+        except Exception:
+            return None
+
+        pids = []
+        for line in output.splitlines():
+            if not line.strip():
+                continue
+            parts = [p.strip().strip('"') for p in line.split('","')]
+            if len(parts) < 2:
+                continue
+            pid = parts[1].strip('"')
+            if not pid.isdigit() or pid in existing:
+                continue
+            pids.append(int(pid))
+        return max(pids) if pids else None
+
+    def get_window_handle_for_pid(self, pid):
+        if sys.platform != "win32" or not pid:
+            return None
+
+        user32 = ctypes.windll.user32
+        hwnds = []
+
+        @ctypes.WINFUNCTYPE(ctypes.c_bool, wintypes.HWND, wintypes.LPARAM)
+        def enum_windows(hwnd, _):
+            if user32.IsWindowVisible(hwnd):
+                proc_id = wintypes.DWORD()
+                user32.GetWindowThreadProcessId(hwnd, ctypes.byref(proc_id))
+                if proc_id.value == pid:
+                    hwnds.append(hwnd)
+                    return False
+            return True
+
+        user32.EnumWindows(enum_windows, 0)
+        return hwnds[0] if hwnds else None
+
+    def hide_instance_window(self, instance_id):
+        if sys.platform != "win32" or not instance_id:
+            return
+        instance = next((i for i in self.active_instances if i["id"] == instance_id), None)
+        if not instance or not instance.get("hwnd"):
+            return
+        ctypes.windll.user32.ShowWindow(instance["hwnd"], 0)
+
+    def show_instance_window(self, instance_id):
+        if sys.platform != "win32" or not instance_id:
+            return
+        instance = next((i for i in self.active_instances if i["id"] == instance_id), None)
+        if not instance or not instance.get("hwnd"):
+            return
+        ctypes.windll.user32.ShowWindow(instance["hwnd"], 5)
+
     def add_instance(self, acc, game_name, place_id, job_id):
         instance = {
             "id": str(uuid.uuid4()),
@@ -1703,9 +1769,11 @@ class App(ctk.CTk):
             "place_id": place_id,
             "job_id": job_id,
             "pid": "Pending",
+            "hwnd": None,
             "started_at": time.time(),
             "status": "Launching",
         }
+        self.hide_instance_window(self.selected_instance_id)
         self.active_instances.insert(0, instance)
         self.selected_instance_id = instance["id"]
         self.render_instances()
@@ -1718,24 +1786,33 @@ class App(ctk.CTk):
                     instance["status"] = status
                     if pid:
                         instance["pid"] = pid
+                        instance["hwnd"] = self.get_window_handle_for_pid(pid)
                     elif status != "Launching" and instance.get("pid") == "Pending":
                         instance["pid"] = "N/A"
                     instance["updated_at"] = time.time()
+                    if instance_id == self.selected_instance_id:
+                        self.show_instance_window(instance_id)
                     break
             self.render_instances()
         self.after(0, _update)
 
     def select_instance(self, instance_id):
+        if instance_id == self.selected_instance_id:
+            return
+        self.hide_instance_window(self.selected_instance_id)
         self.selected_instance_id = instance_id
+        self.show_instance_window(instance_id)
         self.render_instances()
 
     def remove_instance(self, instance_id):
         self.active_instances = [i for i in self.active_instances if i["id"] != instance_id]
         if self.selected_instance_id == instance_id:
             self.selected_instance_id = self.active_instances[0]["id"] if self.active_instances else None
+            self.show_instance_window(self.selected_instance_id)
         self.render_instances()
 
     def clear_instances(self):
+        self.hide_instance_window(self.selected_instance_id)
         self.active_instances.clear()
         self.selected_instance_id = None
         self.render_instances()
@@ -1772,10 +1849,10 @@ class App(ctk.CTk):
                 border_width=1,
                 border_color=THEME["border"],
             )
-            row.pack(fill="x", pady=4, padx=2)
+            row.pack(fill="x", pady=3, padx=2)
 
             info = ctk.CTkFrame(row, fg_color="transparent")
-            info.pack(side="left", fill="both", expand=True, padx=10, pady=6)
+            info.pack(side="left", fill="both", expand=True, padx=10, pady=4)
 
             title_row = ctk.CTkFrame(info, fg_color="transparent")
             title_row.pack(anchor="w")
@@ -1786,7 +1863,7 @@ class App(ctk.CTk):
             name_button = ctk.CTkButton(
                 title_row,
                 text=instance.get("username", "Unknown"),
-                font=FontService.ui(11, "bold"),
+                font=FontService.ui(10, "bold"),
                 fg_color="transparent",
                 hover=True,
                 text_color=THEME["text_main"],
@@ -1796,7 +1873,7 @@ class App(ctk.CTk):
             ctk.CTkLabel(
                 title_row,
                 text=f" • {status_text}",
-                font=FontService.ui(10),
+                font=FontService.ui(9),
                 text_color=status_color,
             ).pack(side="left")
 
@@ -1815,7 +1892,7 @@ class App(ctk.CTk):
                 ctk.CTkLabel(
                     sub_row,
                     text=details,
-                    font=FontService.ui(10),
+                    font=FontService.ui(9),
                     text_color=THEME["text_sub"],
                 ).pack(side="left")
 
@@ -1823,7 +1900,7 @@ class App(ctk.CTk):
                 ctk.CTkLabel(
                     sub_row,
                     text=f" • {started}",
-                    font=FontService.ui(10),
+                    font=FontService.ui(9),
                     text_color=THEME["text_sub"],
                 ).pack(side="left")
 
@@ -1831,7 +1908,7 @@ class App(ctk.CTk):
                 row,
                 text="✕",
                 width=28,
-                height=22,
+                height=20,
                 type="subtle",
                 command=lambda i=instance["id"]: self.remove_instance(i),
             ).pack(side="right", padx=8, pady=6)
@@ -1907,7 +1984,8 @@ class App(ctk.CTk):
         res = self.api.launch(acc, pid, acc.get('user_agent'), job, acc.get('proxy'))
         if res is True or "Fishstrap" in str(res) or "Bloxstrap" in str(res):
             self.safe_log(f"[SUCCESS] Launched {acc['username']}")
-            self.update_instance_status(instance_id, "Running")
+            found_pid = self.get_latest_roblox_pid()
+            self.update_instance_status(instance_id, "Running", found_pid)
         else: 
             self.safe_log(f"[ERROR] Launch Error: {res}")
             self.update_instance_status(instance_id, "Failed")
