@@ -2604,9 +2604,12 @@ class App(ctk.CTk):
              self.safe_log("User not found.")
              return
 
-        p = self.api.check_own_presence(acc["cookie"], uid)
-        
-        self.after(0, lambda: UserFinderWindow(self, u, p if p else {}, lambda j, p: self.launch(acc, j, place_override=p)))
+        p = self.api.get_presence(uid)
+
+        def _launch_from_userfinder(_acc_unused, job_id, place_override=None, server_info=None):
+            self.launch(acc, job_id, place_override=place_override, server_info=server_info)
+
+        self.after(0, lambda: UserFinderWindow(self, u, p if p else {}, _launch_from_userfinder))
 
             
     def get_acc(self): 
