@@ -1925,17 +1925,29 @@ class App(ctk.CTk):
     def anti_afk_loop(self):
         while True:
             now = time.time()
-            for instance in self.active_instances:
+            for instance in list(self.active_instances):
                 if not instance.get("anti_afk_enabled"):
                     continue
+
+                pid = instance.get("pid")
+                if isinstance(pid, int) and not self._pid_alive(pid):
+                    instance["status"] = "Closed"
+                    instance["anti_afk_enabled"] = False
+                    self.safe_log(f"[AntiAFK] {instance.get('username')} pid {pid} is dead; disabled.")
+                    continue
+
                 interval_minutes = max(1, int(instance.get("anti_afk_interval_minutes", 1)))
-                if now - instance.get("last_anti_afk", 0) < interval_minutes * 60:
+                due = instance.get("last_anti_afk", 0) + interval_minutes * 60
+                if now < due:
                     continue
-                hwnd = instance.get("hwnd")
-                if not hwnd:
-                    continue
-                self.send_anti_afk_pulse(hwnd, instance.get("anti_afk_mode", "Jump"))
+
+                if not instance.get("hwnd") and isinstance(pid, int):
+                    instance["hwnd"] = self.get_window_handle_for_pid(pid)
+
                 instance["last_anti_afk"] = now
+                self.safe_log(
+                    f"[AntiAFK] Tick for {instance.get('username')} (mode={instance.get('anti_afk_mode')}, every {interval_minutes}m)"
+                )
             time.sleep(1)
 
     def start_anti_afk_loop(self):
@@ -1943,6 +1955,21 @@ class App(ctk.CTk):
             return
         self.anti_afk_thread_started = True
         threading.Thread(target=self.anti_afk_loop, daemon=True).start()
+
+    def _pid_alive(self, pid):
+        if sys.platform != "win32":
+            return False
+        try:
+            process_query = 0x1000
+            handle = ctypes.windll.kernel32.OpenProcess(process_query, 0, pid)
+            if not handle:
+                return False
+            exit_code = wintypes.DWORD()
+            ctypes.windll.kernel32.GetExitCodeProcess(handle, ctypes.byref(exit_code))
+            ctypes.windll.kernel32.CloseHandle(handle)
+            return exit_code.value == 259
+        except Exception:
+            return False
 
     def resolve_instance_pid(self, instance_id):
         for _ in range(12):
@@ -2144,7 +2171,7 @@ class App(ctk.CTk):
                     try:
                         value = int(entry.get())
                     except ValueError:
-                        value = 60
+                        value = 1
                     target_instance["anti_afk_interval_minutes"] = max(1, value)
                     entry.delete(0, "end")
                     entry.insert(0, str(target_instance["anti_afk_interval_minutes"]))
