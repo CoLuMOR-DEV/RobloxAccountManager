@@ -1905,6 +1905,10 @@ class App(ctk.CTk):
         if sys.platform != "win32" or not hwnd:
             return
         user32 = ctypes.windll.user32
+        previous_hwnd = user32.GetForegroundWindow()
+        user32.ShowWindow(hwnd, 5)
+        user32.SetForegroundWindow(hwnd)
+        time.sleep(0.1)
         if mode == "AD":
             for vk_key in (0x41, 0x44):
                 user32.PostMessageW(hwnd, 0x0100, vk_key, 0)
@@ -1915,6 +1919,8 @@ class App(ctk.CTk):
             user32.PostMessageW(hwnd, 0x0100, vk_space, 0)
             time.sleep(0.1)
             user32.PostMessageW(hwnd, 0x0101, vk_space, 0)
+        if previous_hwnd:
+            user32.SetForegroundWindow(previous_hwnd)
 
     def anti_afk_loop(self):
         while True:
