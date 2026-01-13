@@ -1364,19 +1364,15 @@ class AccountManagerWindow(ctk.CTkToplevel):
         self.destroy()
 
 
-class InstanceWindow(ctk.CTkToplevel):
-    def __init__(self, app, acc, game_name, place_id, job_id):
+class InstanceManagerWindow(ctk.CTkToplevel):
+    def __init__(self, app):
         super().__init__(app)
         self.app = app
-        self.acc = acc
-        self.game_name = game_name or "Unknown Game"
-        self.place_id = place_id or "Unknown"
-        self.job_id = job_id
-        self.sidebar_expanded = True
+        self.instance_tabs = {}
 
-        self.title(f"Instance • {acc.get('username', 'Unknown')}")
+        self.title("Instances")
         self.configure(fg_color=THEME["bg"])
-        self.geometry("980x680")
+        self.geometry("1120x720")
 
         self.grid_columnconfigure(0, weight=1)
         self.grid_rowconfigure(0, weight=1)
@@ -1392,25 +1388,49 @@ class InstanceWindow(ctk.CTkToplevel):
             text_color=THEME["text_main"],
         )
         self.tabs.grid(row=0, column=0, sticky="nsew", padx=16, pady=16)
-        self.tabs.add("Instance")
 
-        container = ctk.CTkFrame(self.tabs.tab("Instance"), fg_color="transparent")
+        self.tabs.add("No Instances")
+        ctk.CTkLabel(
+            self.tabs.tab("No Instances"),
+            text="Launch an account to open an instance.",
+            font=FontService.ui(13),
+            text_color=THEME["text_sub"],
+        ).pack(padx=24, pady=24)
+
+        Utils.center_window(self, 1120, 720)
+
+    def _ensure_placeholder_removed(self):
+        if "No Instances" in self.tabs._tab_dict and len(self.instance_tabs) == 0:
+            self.tabs.delete("No Instances")
+
+    def add_instance(self, acc, game_name, place_id, job_id):
+        self._ensure_placeholder_removed()
+        instance_id = str(uuid.uuid4())
+        username = acc.get("username", "Unknown")
+        display_name = f"{username} • {Utils.time_ago(time.time())}"
+
+        self.tabs.add(display_name)
+        tab = self.tabs.tab(display_name)
+
+        container = ctk.CTkFrame(tab, fg_color="transparent")
         container.pack(fill="both", expand=True)
         container.grid_columnconfigure(1, weight=1)
         container.grid_rowconfigure(0, weight=1)
 
-        self.sidebar = ctk.CTkFrame(
+        sidebar_state = {"expanded": True}
+
+        sidebar = ctk.CTkFrame(
             container,
-            width=220,
+            width=240,
             fg_color=THEME["card_bg"],
             border_width=1,
             border_color=THEME["border"],
             corner_radius=14,
         )
-        self.sidebar.grid(row=0, column=0, sticky="nsew", padx=(0, 12))
-        self.sidebar.grid_propagate(False)
+        sidebar.grid(row=0, column=0, sticky="nsew", padx=(0, 12))
+        sidebar.grid_propagate(False)
 
-        header = ctk.CTkFrame(self.sidebar, fg_color="transparent")
+        header = ctk.CTkFrame(sidebar, fg_color="transparent")
         header.pack(fill="x", padx=12, pady=(12, 8))
         ctk.CTkLabel(
             header,
@@ -1418,91 +1438,120 @@ class InstanceWindow(ctk.CTkToplevel):
             font=FontService.ui(12, "bold"),
             text_color=THEME["text_main"],
         ).pack(side="left")
+
+        settings_body = ctk.CTkFrame(sidebar, fg_color="transparent")
+        settings_body.pack(fill="both", expand=True, padx=12, pady=(0, 12))
+
+        status_label = ctk.CTkLabel(
+            settings_body,
+            text="Status: Launching",
+            font=FontService.ui(11, "bold"),
+            text_color=THEME["warning"],
+        )
+        status_label.pack(anchor="w", pady=(0, 8))
+
+        ctk.CTkLabel(
+            settings_body,
+            text=f"Account: {username}",
+            font=FontService.ui(11),
+            text_color=THEME["text_sub"],
+        ).pack(anchor="w", pady=2)
+        ctk.CTkLabel(
+            settings_body,
+            text=f"Game: {game_name or 'Unknown Game'}",
+            font=FontService.ui(11),
+            text_color=THEME["text_sub"],
+        ).pack(anchor="w", pady=2)
+        ctk.CTkLabel(
+            settings_body,
+            text=f"Place ID: {place_id or 'Unknown'}",
+            font=FontService.ui(11),
+            text_color=THEME["text_sub"],
+        ).pack(anchor="w", pady=2)
+        if job_id:
+            ctk.CTkLabel(
+                settings_body,
+                text=f"Job ID: {job_id}",
+                font=FontService.ui(11),
+                text_color=THEME["text_sub"],
+            ).pack(anchor="w", pady=2)
+
+        def toggle_sidebar():
+            if sidebar_state["expanded"]:
+                sidebar.configure(width=56)
+                settings_body.pack_forget()
+                sidebar_state["expanded"] = False
+            else:
+                sidebar.configure(width=240)
+                settings_body.pack(fill="both", expand=True, padx=12, pady=(0, 12))
+                status_label.pack(anchor="w", pady=(0, 8))
+                for widget in settings_body.winfo_children():
+                    if widget is not status_label:
+                        widget.pack(anchor="w", pady=2)
+                sidebar_state["expanded"] = True
+
         ActionBtn(
             header,
             text="⟷",
             width=28,
             height=24,
             type="subtle",
-            command=self.toggle_sidebar,
+            command=toggle_sidebar,
         ).pack(side="right")
 
-        self.settings_body = ctk.CTkFrame(self.sidebar, fg_color="transparent")
-        self.settings_body.pack(fill="both", expand=True, padx=12, pady=(0, 12))
+        ActionBtn(
+            settings_body,
+            text="Close Instance",
+            width=140,
+            type="danger",
+            command=lambda: self.remove_instance(instance_id),
+        ).pack(anchor="w", pady=(12, 0))
 
-        self.status_label = ctk.CTkLabel(
-            self.settings_body,
-            text="Status: Launching",
-            font=FontService.ui(11, "bold"),
-            text_color=THEME["warning"],
-        )
-        self.status_label.pack(anchor="w", pady=(0, 8))
-
-        ctk.CTkLabel(
-            self.settings_body,
-            text=f"Account: {acc.get('username', 'Unknown')}",
-            font=FontService.ui(11),
-            text_color=THEME["text_sub"],
-        ).pack(anchor="w", pady=2)
-        ctk.CTkLabel(
-            self.settings_body,
-            text=f"Game: {self.game_name}",
-            font=FontService.ui(11),
-            text_color=THEME["text_sub"],
-        ).pack(anchor="w", pady=2)
-        ctk.CTkLabel(
-            self.settings_body,
-            text=f"Place ID: {self.place_id}",
-            font=FontService.ui(11),
-            text_color=THEME["text_sub"],
-        ).pack(anchor="w", pady=2)
-        if self.job_id:
-            ctk.CTkLabel(
-                self.settings_body,
-                text=f"Job ID: {self.job_id}",
-                font=FontService.ui(11),
-                text_color=THEME["text_sub"],
-            ).pack(anchor="w", pady=2)
-
-        self.canvas_frame = ctk.CTkFrame(
+        canvas_frame = ctk.CTkFrame(
             container,
             fg_color=THEME["card_bg"],
             border_width=1,
             border_color=THEME["border"],
             corner_radius=18,
         )
-        self.canvas_frame.grid(row=0, column=1, sticky="nsew")
-        self.canvas_frame.grid_columnconfigure(0, weight=1)
-        self.canvas_frame.grid_rowconfigure(0, weight=1)
+        canvas_frame.grid(row=0, column=1, sticky="nsew")
+        canvas_frame.grid_columnconfigure(0, weight=1)
+        canvas_frame.grid_rowconfigure(0, weight=1)
 
         ctk.CTkLabel(
-            self.canvas_frame,
-            text="Roblox is running in a separate window.\nUse this panel to keep instances organized.",
+            canvas_frame,
+            text="Roblox is running in a separate window.\nSelect another instance from the tabs above to switch.",
             font=FontService.ui(13),
             text_color=THEME["text_sub"],
             justify="center",
         ).grid(row=0, column=0, sticky="nsew", padx=24, pady=24)
 
-        Utils.center_window(self, 980, 680)
+        self.instance_tabs[instance_id] = {
+            "tab_name": display_name,
+            "status_label": status_label,
+        }
+        self.tabs.set(display_name)
+        return instance_id
 
-    def toggle_sidebar(self):
-        if self.sidebar_expanded:
-            self.sidebar.configure(width=52)
-            for widget in self.settings_body.winfo_children():
-                widget.pack_forget()
-            self.settings_body.pack_forget()
-            self.sidebar_expanded = False
-        else:
-            self.sidebar.configure(width=220)
-            self.settings_body.pack(fill="both", expand=True, padx=12, pady=(0, 12))
-            self.status_label.pack(anchor="w", pady=(0, 8))
-            for widget in self.settings_body.winfo_children():
-                if widget is not self.status_label:
-                    widget.pack(anchor="w", pady=2)
-            self.sidebar_expanded = True
+    def update_instance_status(self, instance_id, status, color):
+        instance = self.instance_tabs.get(instance_id)
+        if not instance:
+            return
+        instance["status_label"].configure(text=f"Status: {status}", text_color=color)
 
-    def update_status(self, status, color):
-        self.status_label.configure(text=f"Status: {status}", text_color=color)
+    def remove_instance(self, instance_id):
+        instance = self.instance_tabs.pop(instance_id, None)
+        if not instance:
+            return
+        self.tabs.delete(instance["tab_name"])
+        if not self.instance_tabs and "No Instances" not in self.tabs._tab_dict:
+            self.tabs.add("No Instances")
+            ctk.CTkLabel(
+                self.tabs.tab("No Instances"),
+                text="Launch an account to open an instance.",
+                font=FontService.ui(13),
+                text_color=THEME["text_sub"],
+            ).pack(padx=24, pady=24)
 
 
 class App(ctk.CTk):
@@ -1521,7 +1570,7 @@ class App(ctk.CTk):
         self.browser = WebAutomation(self.safe_log)
         self.data = AccountStore.load()
         self.windows = []
-        self.instance_windows = []
+        self.instance_manager = None
         
         first_acc = next((a for a in self.data if "cookie" in a), None)
         if first_acc:
@@ -1867,18 +1916,26 @@ class App(ctk.CTk):
         AccountStore.save(self.data)
         self.refresh_ui()
         WebhookService.send_launch_log(self.api, acc['username'], game_name, pid, job, acc.get('userid'), manual_track=False, robux=acc.get('robux','0'), server_info=server_info)
-        instance_window = InstanceWindow(self, acc, game_name, pid, job)
-        self.instance_windows.append(instance_window)
-        threading.Thread(target=self._launch_t, args=(acc, pid, job, instance_window), daemon=True).start()
+        instance_manager = self.get_instance_manager()
+        instance_id = instance_manager.add_instance(acc, game_name, pid, job)
+        threading.Thread(target=self._launch_t, args=(acc, pid, job, instance_manager, instance_id), daemon=True).start()
         
-    def _launch_t(self, acc, pid, job, instance_window):
+    def _launch_t(self, acc, pid, job, instance_manager, instance_id):
         res = self.api.launch(acc, pid, acc.get('user_agent'), job, acc.get('proxy'))
         if res is True or "Fishstrap" in str(res) or "Bloxstrap" in str(res):
             self.safe_log(f"[SUCCESS] Launched {acc['username']}")
-            self.after(0, lambda: instance_window.update_status("Running", THEME["success"]))
+            self.after(0, lambda: instance_manager.update_instance_status(instance_id, "Running", THEME["success"]))
         else: 
             self.safe_log(f"[ERROR] Launch Error: {res}")
-            self.after(0, lambda: instance_window.update_status("Failed", THEME["danger"]))
+            self.after(0, lambda: instance_manager.update_instance_status(instance_id, "Failed", THEME["danger"]))
+
+    def get_instance_manager(self):
+        if self.instance_manager and self.instance_manager.winfo_exists():
+            self.instance_manager.lift()
+            return self.instance_manager
+
+        self.instance_manager = InstanceManagerWindow(self)
+        return self.instance_manager
         
     def login(self, acc): 
         threading.Thread(target=self.browser.open, args=(acc['username'], CryptoUtil.decrypt(acc.get('password')), acc.get('cookie'), "https://www.roblox.com/home", self.update_acc, "LOGIN_ONLY", acc.get('proxy')), daemon=True).start()
