@@ -1746,6 +1746,24 @@ class App(ctk.CTk):
         existing = {str(i.get("pid")) for i in self.active_instances if i.get("pid") not in (None, "Pending", "N/A")}
         try:
             output = subprocess.check_output(
+                [
+                    "powershell",
+                    "-NoProfile",
+                    "-Command",
+                    "Get-Process RobloxPlayerBeta | Sort-Object StartTime -Descending | Select-Object -ExpandProperty Id",
+                ],
+                text=True,
+                encoding="utf-8",
+                errors="ignore",
+            )
+            for line in output.splitlines():
+                pid = line.strip()
+                if pid.isdigit() and pid not in existing:
+                    return int(pid)
+        except Exception:
+            pass
+        try:
+            output = subprocess.check_output(
                 ["tasklist", "/FI", "IMAGENAME eq RobloxPlayerBeta.exe", "/FO", "CSV", "/NH"],
                 text=True,
                 encoding="utf-8",
@@ -1815,6 +1833,8 @@ class App(ctk.CTk):
         for instance in self.active_instances:
             if instance.get("hwnd"):
                 ctypes.windll.user32.ShowWindow(instance["hwnd"], 0)
+            else:
+                instance["pending_hide"] = True
 
     def show_all_instances(self):
         if sys.platform != "win32":
@@ -1822,6 +1842,8 @@ class App(ctk.CTk):
         for instance in self.active_instances:
             if instance.get("hwnd"):
                 ctypes.windll.user32.ShowWindow(instance["hwnd"], 5)
+            else:
+                instance["pending_show"] = True
 
     def minimize_all_instances(self):
         if sys.platform != "win32":
@@ -1868,7 +1890,7 @@ class App(ctk.CTk):
             "pending_show": False,
             "anti_afk_enabled": False,
             "anti_afk_mode": "Jump",
-            "anti_afk_interval": 60,
+            "anti_afk_interval_minutes": 1,
             "last_anti_afk": 0,
             "started_at": time.time(),
             "status": "Launching",
@@ -1886,10 +1908,12 @@ class App(ctk.CTk):
         if mode == "AD":
             for vk_key in (0x41, 0x44):
                 user32.PostMessageW(hwnd, 0x0100, vk_key, 0)
+                time.sleep(0.1)
                 user32.PostMessageW(hwnd, 0x0101, vk_key, 0)
         else:
             vk_space = 0x20
             user32.PostMessageW(hwnd, 0x0100, vk_space, 0)
+            time.sleep(0.1)
             user32.PostMessageW(hwnd, 0x0101, vk_space, 0)
 
     def anti_afk_loop(self):
@@ -1898,8 +1922,8 @@ class App(ctk.CTk):
             for instance in self.active_instances:
                 if not instance.get("anti_afk_enabled"):
                     continue
-                interval = max(10, int(instance.get("anti_afk_interval", 60)))
-                if now - instance.get("last_anti_afk", 0) < interval:
+                interval_minutes = max(1, int(instance.get("anti_afk_interval_minutes", 1)))
+                if now - instance.get("last_anti_afk", 0) < interval_minutes * 60:
                     continue
                 hwnd = instance.get("hwnd")
                 if not hwnd:
@@ -1913,6 +1937,15 @@ class App(ctk.CTk):
             return
         self.anti_afk_thread_started = True
         threading.Thread(target=self.anti_afk_loop, daemon=True).start()
+
+    def resolve_instance_pid(self, instance_id):
+        for _ in range(12):
+            pid = self.get_latest_roblox_pid()
+            if pid:
+                self.update_instance_status(instance_id, "Running", pid)
+                return
+            time.sleep(1)
+        self.update_instance_status(instance_id, "Running")
 
     def update_instance_status(self, instance_id, status, pid=None):
         def _update():
@@ -1928,7 +1961,7 @@ class App(ctk.CTk):
                         if instance.get("pending_show"):
                             ctypes.windll.user32.ShowWindow(instance["hwnd"], 5)
                             instance["pending_show"] = False
-                    elif status != "Launching" and instance.get("pid") == "Pending":
+                    elif status == "Failed" and instance.get("pid") == "Pending":
                         instance["pid"] = "N/A"
                     instance["updated_at"] = time.time()
                     if instance_id == self.selected_instance_id:
@@ -2081,6 +2114,13 @@ class App(ctk.CTk):
                 )
                 mode_menu.pack(side="left", padx=(0, 6))
 
+                ctk.CTkLabel(
+                    anti_row,
+                    text="min",
+                    font=FontService.ui(9),
+                    text_color=THEME["text_sub"],
+                ).pack(side="left", padx=(0, 6))
+
                 interval_entry = ctk.CTkEntry(
                     anti_row,
                     width=80,
@@ -2091,7 +2131,7 @@ class App(ctk.CTk):
                     border_width=1,
                     corner_radius=8,
                 )
-                interval_entry.insert(0, str(instance.get("anti_afk_interval", 60)))
+                interval_entry.insert(0, str(instance.get("anti_afk_interval_minutes", 1)))
                 interval_entry.pack(side="left", padx=(0, 6))
 
                 def apply_interval(target_instance, entry=interval_entry):
@@ -2099,9 +2139,9 @@ class App(ctk.CTk):
                         value = int(entry.get())
                     except ValueError:
                         value = 60
-                    target_instance["anti_afk_interval"] = max(10, value)
+                    target_instance["anti_afk_interval_minutes"] = max(1, value)
                     entry.delete(0, "end")
-                    entry.insert(0, str(target_instance["anti_afk_interval"]))
+                    entry.insert(0, str(target_instance["anti_afk_interval_minutes"]))
 
                 ActionBtn(
                     anti_row,
@@ -2194,8 +2234,7 @@ class App(ctk.CTk):
         res = self.api.launch(acc, pid, acc.get('user_agent'), job, acc.get('proxy'))
         if res is True or "Fishstrap" in str(res) or "Bloxstrap" in str(res):
             self.safe_log(f"[SUCCESS] Launched {acc['username']}")
-            found_pid = self.get_latest_roblox_pid()
-            self.update_instance_status(instance_id, "Running", found_pid)
+            threading.Thread(target=self.resolve_instance_pid, args=(instance_id,), daemon=True).start()
         else: 
             self.safe_log(f"[ERROR] Launch Error: {res}")
             self.update_instance_status(instance_id, "Failed")
