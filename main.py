@@ -1377,6 +1377,12 @@ class App(ctk.CTk):
         self.title(f"{APP_NAME}")
         self.geometry("1150x780")
         self.configure(fg_color=THEME["bg"])
+        icon_path = os.path.join(os.getcwd(), "icon.ico")
+        if os.path.exists(icon_path):
+            try:
+                self.iconbitmap(icon_path)
+            except Exception:
+                pass
         
         self.api = RobloxClient(self.safe_log)
         self.browser = WebAutomation(self.safe_log)
@@ -1384,12 +1390,12 @@ class App(ctk.CTk):
         self.windows = []
         self.active_instances = []
         self.selected_instance_id = None
-        self.anti_afk_thread_started = False
+        self.sidebar_expanded = True
+        self.sidebar_items = []
         
         first_acc = next((a for a in self.data if "cookie" in a), None)
         if first_acc:
             HttpClient.set_cookie(first_acc["cookie"])
-        self.start_anti_afk_loop()
         
         self.grid_columnconfigure(1, weight=1)
         self.grid_rowconfigure(0, weight=1)
@@ -1420,24 +1426,33 @@ class App(ctk.CTk):
             font=FontService.ui(11),
             text_color=THEME["text_sub"],
         ).pack(anchor="w", pady=(2, 0))
+        ActionBtn(
+            header,
+            text="⟷",
+            width=28,
+            height=24,
+            type="subtle",
+            command=self.toggle_sidebar,
+        ).pack(side="right")
         
-        self.side_btn(self.sidebar, "Import Accounts", self.import_data)
-        self.side_btn(self.sidebar, "Add Account", self.manual)
-        self.side_btn(self.sidebar, "Refresh All", self.refresh)
+        self.sidebar_items.append((self.side_btn(self.sidebar, "Import Accounts", self.import_data), {"pady": 7, "padx": 16}))
+        self.sidebar_items.append((self.side_btn(self.sidebar, "Add Account", self.manual), {"pady": 7, "padx": 16}))
+        self.sidebar_items.append((self.side_btn(self.sidebar, "Refresh All", self.refresh), {"pady": 7, "padx": 16}))
         
         def kill_all():
             if messagebox.askyesno("Panic", "Force close ALL Roblox instances?"):
                 subprocess.call("taskkill /F /IM RobloxPlayerBeta.exe", shell=True)
                 self.safe_log("[ALERT] Killed all Roblox processes.")
-        self.side_btn(self.sidebar, "Kill All Roblox", kill_all, color="danger")
+        self.sidebar_items.append((self.side_btn(self.sidebar, "Kill All Roblox", kill_all, color="danger"), {"pady": 7, "padx": 16}))
         
-        self.side_btn(self.sidebar, "Check Health", self.check_health)
-        self.side_btn(self.sidebar, "Settings", self.open_settings)
+        self.sidebar_items.append((self.side_btn(self.sidebar, "Check Health", self.check_health), {"pady": 7, "padx": 16}))
+        self.sidebar_items.append((self.side_btn(self.sidebar, "Settings", self.open_settings), {"pady": 7, "padx": 16}))
         
         self.status_bar = ctk.CTkLabel(
             self.sidebar, text="Ready", text_color=THEME["text_sub"], anchor="w", font=FontService.ui(11)
         )
         self.status_bar.pack(side="bottom", fill="x", padx=16, pady=(6, 6))
+        self.sidebar_items.append((self.status_bar, {"side": "bottom", "fill": "x", "padx": 16, "pady": (6, 6)}))
 
         self.console = ctk.CTkTextbox(
             self.sidebar,
@@ -1450,6 +1465,7 @@ class App(ctk.CTk):
             font=FontService.mono(11),
         )
         self.console.pack(fill="x", padx=16, pady=(0, 16), side="bottom")
+        self.sidebar_items.append((self.console, {"fill": "x", "padx": 16, "pady": (0, 16), "side": "bottom"}))
 
         self.main_area = ctk.CTkFrame(self, fg_color="transparent")
         self.main_area.grid(row=0, column=1, sticky="nsew", padx=20, pady=20)
@@ -1555,6 +1571,7 @@ class App(ctk.CTk):
         Utils.center_window(self, 1150, 780)
         self.refresh_ui()
         
+        threading.Thread(target=self.instances_refresh_loop, daemon=True).start()
         threading.Thread(target=self.tracking_loop, daemon=True).start()
 
     def tracking_loop(self):
@@ -1611,6 +1628,19 @@ class App(ctk.CTk):
             type=color
         )
         btn.pack(pady=7, padx=16)
+        return btn
+
+    def toggle_sidebar(self):
+        if self.sidebar_expanded:
+            for widget, _opts in self.sidebar_items:
+                widget.pack_forget()
+            self.sidebar.configure(width=70)
+            self.sidebar_expanded = False
+        else:
+            self.sidebar.configure(width=260)
+            for widget, opts in self.sidebar_items:
+                widget.pack(**opts)
+            self.sidebar_expanded = True
 
     def safe_log(self, m): 
         msg = Utils.timestamp_msg(m)
@@ -1937,11 +1967,6 @@ class App(ctk.CTk):
             "hwnd": None,
             "pending_hide": False,
             "pending_show": False,
-            "anti_afk_enabled": False,
-            "anti_afk_mode": "Jump",
-            "anti_afk_interval_minutes": 1,
-            "anti_afk_restore_foreground": True,
-            "last_anti_afk": 0,
             "started_at": time.time(),
             "status": "Launching",
         }
@@ -1962,115 +1987,20 @@ class App(ctk.CTk):
             "hwnd": self.get_window_handle_for_pid(pid),
             "pending_hide": False,
             "pending_show": False,
-            "anti_afk_enabled": False,
-            "anti_afk_mode": "Jump",
-            "anti_afk_interval_minutes": 1,
-            "anti_afk_restore_foreground": True,
-            "last_anti_afk": 0,
             "started_at": time.time(),
             "status": "Running",
         }
         self.active_instances.insert(0, instance)
 
-    def scan_instances(self):
+    def scan_instances(self, silent=False):
         pids = set(self.get_roblox_pids())
         tracked_pids = {i.get("pid") for i in self.active_instances if isinstance(i.get("pid"), int)}
         for pid in sorted(pids - tracked_pids, reverse=True):
             self.add_scanned_instance(pid)
         if self.active_instances and not self.selected_instance_id:
             self.selected_instance_id = self.active_instances[0]["id"]
-        self.render_instances()
-
-    def send_anti_afk_pulse(self, hwnd, mode, restore_foreground):
-        if sys.platform != "win32" or not hwnd:
-            return
-        user32 = ctypes.windll.user32
-        previous_hwnd = user32.GetForegroundWindow()
-        user32.ShowWindow(hwnd, 5)
-        user32.SetForegroundWindow(hwnd)
-        time.sleep(0.1)
-        if mode == "AD":
-            for vk_key in (0x41, 0x44):
-                self.send_virtual_key(vk_key)
-                time.sleep(0.1)
-        else:
-            vk_space = 0x20
-            self.send_virtual_key(vk_space)
-        if restore_foreground and previous_hwnd:
-            user32.SetForegroundWindow(previous_hwnd)
-
-    def send_virtual_key(self, vk_key):
-        if sys.platform != "win32":
-            return
-        user32 = ctypes.windll.user32
-
-        class KEYBDINPUT(ctypes.Structure):
-            _fields_ = [
-                ("wVk", wintypes.WORD),
-                ("wScan", wintypes.WORD),
-                ("dwFlags", wintypes.DWORD),
-                ("time", wintypes.DWORD),
-                ("dwExtraInfo", ctypes.POINTER(ctypes.c_ulong)),
-            ]
-
-        class INPUT(ctypes.Structure):
-            _fields_ = [("type", wintypes.DWORD), ("ki", KEYBDINPUT)]
-
-        extra = ctypes.c_ulong(0)
-        key_down = INPUT(
-            type=1,
-            ki=KEYBDINPUT(wVk=vk_key, wScan=0, dwFlags=0, time=0, dwExtraInfo=ctypes.pointer(extra)),
-        )
-        key_up = INPUT(
-            type=1,
-            ki=KEYBDINPUT(wVk=vk_key, wScan=0, dwFlags=2, time=0, dwExtraInfo=ctypes.pointer(extra)),
-        )
-        user32.SendInput(1, ctypes.byref(key_down), ctypes.sizeof(INPUT))
-        user32.SendInput(1, ctypes.byref(key_up), ctypes.sizeof(INPUT))
-
-    def anti_afk_loop(self):
-        while True:
-            now = time.time()
-            for instance in list(self.active_instances):
-                if not instance.get("anti_afk_enabled"):
-                    continue
-
-                pid = instance.get("pid")
-                if isinstance(pid, int) and not self._pid_alive(pid):
-                    instance["status"] = "Closed"
-                    instance["anti_afk_enabled"] = False
-                    self.safe_log(f"[AntiAFK] {instance.get('username')} pid {pid} is dead; disabled.")
-                    continue
-
-                interval_minutes = max(1, int(instance.get("anti_afk_interval_minutes", 1)))
-                due = instance.get("last_anti_afk", 0) + interval_minutes * 60
-                if now < due:
-                    continue
-
-                if not instance.get("hwnd") and isinstance(pid, int):
-                    instance["hwnd"] = self.get_window_handle_for_pid(pid)
-
-                hwnd = instance.get("hwnd")
-                if not hwnd:
-                    continue
-
-                self.send_anti_afk_pulse(
-                    hwnd,
-                    instance.get("anti_afk_mode", "Jump"),
-                    instance.get("anti_afk_restore_foreground", True),
-                )
-                instance["last_anti_afk"] = now
-                self.safe_log(
-                    f"[AntiAFK] Tick for {instance.get('username')} (mode={instance.get('anti_afk_mode')}, every {interval_minutes}m)"
-                )
-            self.cleanup_instances()
-            time.sleep(1)
-
-    def start_anti_afk_loop(self):
-        if self.anti_afk_thread_started:
-            return
-        self.anti_afk_thread_started = True
-        threading.Thread(target=self.anti_afk_loop, daemon=True).start()
+        if not silent:
+            self.render_instances()
 
     def _pid_alive(self, pid):
         if sys.platform != "win32":
@@ -2086,6 +2016,12 @@ class App(ctk.CTk):
             return exit_code.value == 259
         except Exception:
             return False
+
+    def instances_refresh_loop(self):
+        while True:
+            self.scan_instances(silent=True)
+            self.cleanup_instances()
+            time.sleep(3)
 
     def cleanup_instances(self):
         removed = False
@@ -2244,95 +2180,6 @@ class App(ctk.CTk):
                     text_color=THEME["text_sub"],
                 ).pack(side="left")
 
-                anti_row = ctk.CTkFrame(info, fg_color="transparent")
-                anti_row.pack(anchor="w", pady=(4, 0))
-
-                anti_var = ctk.BooleanVar(value=instance.get("anti_afk_enabled", False))
-                anti_switch = ctk.CTkSwitch(
-                    anti_row,
-                    text="Anti-AFK",
-                    variable=anti_var,
-                    fg_color=THEME["card_hover"],
-                    progress_color=THEME["accent"],
-                    button_color=THEME["border"],
-                    button_hover_color=THEME["separator"],
-                    text_color=THEME["text_main"],
-                    width=80,
-                    command=lambda i=instance, v=anti_var: i.update({"anti_afk_enabled": v.get()}),
-                )
-                anti_switch.pack(side="left", padx=(0, 6))
-
-                mode_var = ctk.StringVar(value=instance.get("anti_afk_mode", "Jump"))
-                mode_menu = ctk.CTkOptionMenu(
-                    anti_row,
-                    values=["Jump", "AD"],
-                    variable=mode_var,
-                    width=90,
-                    fg_color=THEME["input_bg"],
-                    button_color=THEME["accent"],
-                    button_hover_color=THEME["accent_hover"],
-                    text_color=THEME["text_main"],
-                    dropdown_text_color=THEME["text_main"],
-                    dropdown_fg_color=THEME["card_bg"],
-                    command=lambda v, i=instance: i.update({"anti_afk_mode": v}),
-                )
-                mode_menu.pack(side="left", padx=(0, 6))
-
-                focus_var = ctk.StringVar(
-                    value="Restore" if instance.get("anti_afk_restore_foreground", True) else "Keep"
-                )
-                focus_menu = ctk.CTkOptionMenu(
-                    anti_row,
-                    values=["Restore", "Keep"],
-                    variable=focus_var,
-                    width=100,
-                    fg_color=THEME["input_bg"],
-                    button_color=THEME["accent"],
-                    button_hover_color=THEME["accent_hover"],
-                    text_color=THEME["text_main"],
-                    dropdown_text_color=THEME["text_main"],
-                    dropdown_fg_color=THEME["card_bg"],
-                    command=lambda v, i=instance: i.update({"anti_afk_restore_foreground": v == "Restore"}),
-                )
-                focus_menu.pack(side="left", padx=(0, 6))
-
-                ctk.CTkLabel(
-                    anti_row,
-                    text="min",
-                    font=FontService.ui(9),
-                    text_color=THEME["text_sub"],
-                ).pack(side="left", padx=(0, 6))
-
-                interval_entry = ctk.CTkEntry(
-                    anti_row,
-                    width=80,
-                    height=24,
-                    fg_color=THEME["input_bg"],
-                    text_color=THEME["text_main"],
-                    border_color=THEME["border"],
-                    border_width=1,
-                    corner_radius=8,
-                )
-                interval_entry.insert(0, str(instance.get("anti_afk_interval_minutes", 1)))
-                interval_entry.pack(side="left", padx=(0, 6))
-
-                def apply_interval(target_instance, entry=interval_entry):
-                    try:
-                        value = int(entry.get())
-                    except ValueError:
-                        value = 1
-                    target_instance["anti_afk_interval_minutes"] = max(1, value)
-                    entry.delete(0, "end")
-                    entry.insert(0, str(target_instance["anti_afk_interval_minutes"]))
-
-                ActionBtn(
-                    anti_row,
-                    text="Set",
-                    width=40,
-                    height=22,
-                    type="subtle",
-                    command=lambda i=instance: apply_interval(i),
-                ).pack(side="left")
 
             ActionBtn(
                 row,
