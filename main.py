@@ -11,8 +11,6 @@ import webbrowser
 import shutil
 import subprocess
 import random
-import ctypes
-from ctypes import wintypes
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
 from io import BytesIO
@@ -196,6 +194,16 @@ class Utils:
         if diff < 60: return "Just now"
         if diff < 3600: return f"{int(diff // 60)}m ago"
         return f"{int(diff // 3600)}h ago"
+
+    @staticmethod
+    def random_string(length=8):
+        chars = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
+        return "".join(random.choice(chars) for _ in range(length))
+
+    @staticmethod
+    def random_string(length=8):
+        chars = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
+        return "".join(random.choice(chars) for _ in range(length))
         
     @staticmethod
     def clean_game_cache():
@@ -713,6 +721,13 @@ class WebAutomation:
                         driver.find_element(By.ID, "login-password").send_keys(p); time.sleep(0.5)
                         driver.find_element(By.ID, "login-button").click()
                     except Exception as e: self.log(f"Auto-login failed: {e}")
+                if u and p and mode == "SIGNUP":
+                    self.log(f"Attempting auto-signup for {u}...")
+                    try:
+                        WebDriverWait(driver, 10).until(EC.presence_of_element_located((By.ID, "signup-username")))
+                        driver.find_element(By.ID, "signup-username").send_keys(u); time.sleep(0.5)
+                        driver.find_element(By.ID, "signup-password").send_keys(p); time.sleep(0.5)
+                    except Exception as e: self.log(f"Auto-signup failed: {e}")
             if mode == "LOGIN_ONLY":
                 start = time.time()
                 while time.time() - start < 300:
@@ -722,6 +737,19 @@ class WebAutomation:
                             c = driver.get_cookies()
                             sec = next((x["value"] for x in c if x["name"] == ".ROBLOSECURITY"), None)
                             if sec: cb(u, p, sec, driver.execute_script("return navigator.userAgent;")); break
+                    except: break
+                    time.sleep(1)
+                driver.quit(); return
+            if mode == "SIGNUP":
+                start = time.time()
+                while time.time() - start < 600:
+                    try:
+                        if not driver.window_handles: break
+                        c = driver.get_cookies()
+                        sec = next((x["value"] for x in c if x["name"] == ".ROBLOSECURITY"), None)
+                        if sec:
+                            cb(u, p, sec, driver.execute_script("return navigator.userAgent;"))
+                            break
                     except: break
                     time.sleep(1)
                 driver.quit(); return
@@ -804,6 +832,71 @@ class InputDialog(ctk.CTkToplevel):
     def ask(self):
         self.wait_window()
         return self.res
+
+
+class CreateAccountWindow(ctk.CTkToplevel):
+    def __init__(self, parent, callback):
+        super().__init__(parent)
+        self.title("Create Accounts")
+        self.cb = callback
+        self.grab_set()
+        self.configure(fg_color=THEME["bg"])
+
+        card = CardFrame(self, height=None)
+        card.pack(fill="both", expand=True, padx=20, pady=20)
+
+        ctk.CTkLabel(card, text="How Many Accounts", text_color=THEME["text_sub"], font=FontService.ui(12, "bold")).pack(pady=(12, 2))
+        self.count_entry = ctk.CTkEntry(card, width=200, fg_color=THEME["input_bg"], text_color=THEME["text_main"], border_color=THEME["border"], border_width=1, corner_radius=12)
+        self.count_entry.insert(0, "1")
+        self.count_entry.pack(pady=6)
+
+        ctk.CTkLabel(card, text="Base Name", text_color=THEME["text_sub"], font=FontService.ui(12, "bold")).pack(pady=(6, 2))
+        self.base_entry = ctk.CTkEntry(card, width=260, fg_color=THEME["input_bg"], text_color=THEME["text_main"], border_color=THEME["border"], border_width=1, corner_radius=12)
+        self.base_entry.insert(0, "user")
+        self.base_entry.pack(pady=6)
+
+        self.random_names_var = ctk.BooleanVar(value=True)
+        ctk.CTkSwitch(
+            card,
+            text="Random Names",
+            variable=self.random_names_var,
+            fg_color=THEME["card_hover"],
+            progress_color=THEME["accent"],
+            button_color=THEME["border"],
+            button_hover_color=THEME["separator"],
+            text_color=THEME["text_main"],
+        ).pack(pady=(4, 6))
+
+        ctk.CTkLabel(card, text="Password (if not random)", text_color=THEME["text_sub"], font=FontService.ui(12, "bold")).pack(pady=(6, 2))
+        self.password_entry = ctk.CTkEntry(card, width=260, fg_color=THEME["input_bg"], text_color=THEME["text_main"], border_color=THEME["border"], border_width=1, corner_radius=12, show="*")
+        self.password_entry.insert(0, "Password123!")
+        self.password_entry.pack(pady=6)
+
+        self.random_pass_var = ctk.BooleanVar(value=True)
+        ctk.CTkSwitch(
+            card,
+            text="Random Password",
+            variable=self.random_pass_var,
+            fg_color=THEME["card_hover"],
+            progress_color=THEME["accent"],
+            button_color=THEME["border"],
+            button_hover_color=THEME["separator"],
+            text_color=THEME["text_main"],
+        ).pack(pady=(4, 12))
+
+        ActionBtn(card, text="Create", type="success", command=self.submit).pack(fill="x", padx=12, pady=(0, 12))
+        Utils.center_window(self, 420, 430)
+
+    def submit(self):
+        try:
+            count = int(self.count_entry.get().strip())
+        except ValueError:
+            count = 1
+        count = max(1, min(count, 20))
+        base = self.base_entry.get().strip()
+        password = self.password_entry.get().strip()
+        self.cb(count, base, self.random_names_var.get(), self.random_pass_var.get(), password)
+        self.destroy()
 
 
 class SettingsWindow(ctk.CTkToplevel):
@@ -1348,7 +1441,7 @@ class AccountManagerWindow(ctk.CTkToplevel):
             "group": self.grp_entry.get(),
             "notes": self.notes_box.get("0.0", "end").strip(),
             "default_place_id": pid,
-            "proxy": self.proxy_entry.get().strip(),
+            "proxy": self.proxy_entry.get().strip()
         })
         
         c_val = self.cookie_entry.get().strip()
@@ -1388,8 +1481,6 @@ class App(ctk.CTk):
         self.browser = WebAutomation(self.safe_log)
         self.data = AccountStore.load()
         self.windows = []
-        self.active_instances = []
-        self.selected_instance_id = None
         self.sidebar_expanded = True
         self.sidebar_items = []
         
@@ -1445,7 +1536,7 @@ class App(ctk.CTk):
                 self.safe_log("[ALERT] Killed all Roblox processes.")
         self.sidebar_items.append((self.side_btn(self.sidebar, "Kill All Roblox", kill_all, color="danger"), {"pady": 7, "padx": 16}))
         
-        self.sidebar_items.append((self.side_btn(self.sidebar, "Check Health", self.check_health), {"pady": 7, "padx": 16}))
+        self.sidebar_items.append((self.side_btn(self.sidebar, "Create Account", self.create_accounts), {"pady": 7, "padx": 16}))
         self.sidebar_items.append((self.side_btn(self.sidebar, "Settings", self.open_settings), {"pady": 7, "padx": 16}))
         
         self.status_bar = ctk.CTkLabel(
@@ -1482,79 +1573,7 @@ class App(ctk.CTk):
         )
         self.tabs.pack(fill="both", expand=True)
         self.tabs.add("Accounts")
-        self.tabs.add("Instances")
         self.tabs.add("Game Tools")
-        
-        instances_tab = self.tabs.tab("Instances")
-        self.instances_section = CardFrame(instances_tab, corner_radius=16, height=None)
-        self.instances_section.pack_propagate(True)
-        self.instances_section.pack(fill="x", pady=(10, 6), padx=12)
-
-        instances_header = ctk.CTkFrame(self.instances_section, fg_color="transparent")
-        instances_header.pack(fill="x", padx=14, pady=(12, 6))
-        ctk.CTkLabel(
-            instances_header,
-            text="Instances",
-            font=FontService.ui(12, "bold"),
-            text_color=THEME["text_main"],
-        ).pack(side="left")
-        ActionBtn(
-            instances_header,
-            text="Scan",
-            width=60,
-            height=24,
-            type="subtle",
-            command=self.scan_instances,
-        ).pack(side="right")
-        ActionBtn(
-            instances_header,
-            text="Hide All",
-            width=70,
-            height=24,
-            type="subtle",
-            command=self.hide_all_instances,
-        ).pack(side="right", padx=(6, 0))
-        ActionBtn(
-            instances_header,
-            text="Show All",
-            width=70,
-            height=24,
-            type="subtle",
-            command=self.show_all_instances,
-        ).pack(side="right", padx=(6, 0))
-        ActionBtn(
-            instances_header,
-            text="Minimize",
-            width=80,
-            height=24,
-            type="subtle",
-            command=self.minimize_all_instances,
-        ).pack(side="right", padx=(6, 0))
-        ActionBtn(
-            instances_header,
-            text="Tile",
-            width=60,
-            height=24,
-            type="subtle",
-            command=self.tile_instance_windows,
-        ).pack(side="right", padx=(6, 0))
-        ActionBtn(
-            instances_header,
-            text="Clear",
-            width=60,
-            height=24,
-            type="subtle",
-            command=self.clear_instances,
-        ).pack(side="right")
-
-        self.instances_list = ctk.CTkScrollableFrame(
-            self.instances_section,
-            height=100,
-            fg_color="transparent",
-            scrollbar_button_color=THEME["border"],
-            scrollbar_button_hover_color=THEME["accent"],
-        )
-        self.instances_list.pack(fill="x", padx=12, pady=(0, 12))
         
         self.scroll = ctk.CTkScrollableFrame(
             self.tabs.tab("Accounts"),
@@ -1571,7 +1590,6 @@ class App(ctk.CTk):
         Utils.center_window(self, 1150, 780)
         self.refresh_ui()
         
-        threading.Thread(target=self.instances_refresh_loop, daemon=True).start()
         threading.Thread(target=self.tracking_loop, daemon=True).start()
 
     def tracking_loop(self):
@@ -1591,23 +1609,18 @@ class App(ctk.CTk):
                                 acc["last_known_job"] = new_job
                                 
                                 game_name = p.get("lastLocation", "Unknown Game")
-                                last_webhook_job = acc.get("last_webhook_job")
-                                if acc.get("suppress_next_webhook"):
-                                    acc["suppress_next_webhook"] = False
-                                    acc["last_webhook_job"] = new_job
-                                elif new_job != last_webhook_job:
-                                    acc["last_webhook_job"] = new_job
-                                    WebhookService.send_launch_log(
-                                        self.api, 
-                                        acc['username'], 
-                                        game_name, 
-                                        new_place, 
-                                        new_job, 
-                                        uid, 
-                                        manual_track=True, 
-                                        robux=acc.get('robux','0')
-                                    )
-                                    self.safe_log(f"[TRACK] {acc['username']} moved to {game_name}")
+                                
+                                WebhookService.send_launch_log(
+                                    self.api, 
+                                    acc['username'], 
+                                    game_name, 
+                                    new_place, 
+                                    new_job, 
+                                    uid, 
+                                    manual_track=True, 
+                                    robux=acc.get('robux','0')
+                                )
+                                self.safe_log(f"[TRACK] {acc['username']} moved to {game_name}")
             
             time.sleep(10)
 
@@ -1634,30 +1647,13 @@ class App(ctk.CTk):
         if self.sidebar_expanded:
             for widget, _opts in self.sidebar_items:
                 widget.pack_forget()
-            self.animate_sidebar_width(260, 70, on_complete=lambda: self._set_sidebar_state(False))
+            self.sidebar.configure(width=70)
+            self.sidebar_expanded = False
         else:
+            self.sidebar.configure(width=260)
             for widget, opts in self.sidebar_items:
                 widget.pack(**opts)
-            self.animate_sidebar_width(70, 260, on_complete=lambda: self._set_sidebar_state(True))
-
-    def _set_sidebar_state(self, expanded):
-        self.sidebar_expanded = expanded
-
-    def animate_sidebar_width(self, start, end, on_complete=None):
-        steps = 10
-        duration_ms = 120
-        delta = (end - start) / steps
-
-        def _step(i, current):
-            self.sidebar.configure(width=int(current))
-            if i >= steps:
-                self.sidebar.configure(width=end)
-                if on_complete:
-                    on_complete()
-                return
-            self.after(int(duration_ms / steps), lambda: _step(i + 1, current + delta))
-
-        _step(0, start)
+            self.sidebar_expanded = True
 
     def safe_log(self, m): 
         msg = Utils.timestamp_msg(m)
@@ -1677,13 +1673,36 @@ class App(ctk.CTk):
             self.safe_log("[SUCCESS] Health Check Complete.")
         threading.Thread(target=run_check, daemon=True).start()
 
+    def create_accounts(self):
+        CreateAccountWindow(self, self.start_account_creation)
+
+    def start_account_creation(self, count, base_name, random_names, random_password, fallback_password):
+        def _task():
+            for i in range(count):
+                username = self.generate_username(base_name, random_names, i, count)
+                password = self.generate_password(random_password, fallback_password)
+                self.safe_log(f"[INFO] Creating account {username}...")
+                self.browser.open(username, password, None, "https://www.roblox.com/signup", self.update_acc, mode="SIGNUP")
+        threading.Thread(target=_task, daemon=True).start()
+
+    def generate_username(self, base_name, random_names, index, total):
+        base = base_name or "user"
+        if random_names:
+            return f"{base}{Utils.random_string(6)}"
+        if total > 1:
+            return f"{base}{index + 1}"
+        return base
+
+    def generate_password(self, random_password, fallback_password):
+        if random_password:
+            return f"{Utils.random_string(8)}!{random.randint(10, 99)}"
+        return fallback_password or "Password123!"
+
     def refresh_ui(self):
         for a in self.data:
             a.setdefault("locked", False)
             a.setdefault("last_job_id", None)
-            a.setdefault("last_webhook_job", None)
-            a.setdefault("suppress_next_webhook", False)
-        self.render_instances()
+            
         for w in self.scroll.winfo_children(): w.destroy()
         
         self.scroll._parent_canvas.yview_moveto(0)
@@ -1793,419 +1812,6 @@ class App(ctk.CTk):
         global parent
         parent = self
         AccountManagerWindow(self, acc, lambda: self.refresh_ui(), self.api, self)
-
-    def get_latest_roblox_pid(self):
-        if sys.platform != "win32":
-            return None
-
-        existing = {str(i.get("pid")) for i in self.active_instances if i.get("pid") not in (None, "Pending", "N/A")}
-        try:
-            output = subprocess.check_output(
-                [
-                    "powershell",
-                    "-NoProfile",
-                    "-Command",
-                    "Get-Process RobloxPlayerBeta | Sort-Object StartTime -Descending | Select-Object -ExpandProperty Id",
-                ],
-                text=True,
-                encoding="utf-8",
-                errors="ignore",
-            )
-            for line in output.splitlines():
-                pid = line.strip()
-                if pid.isdigit() and pid not in existing:
-                    return int(pid)
-        except Exception:
-            pass
-        try:
-            output = subprocess.check_output(
-                ["tasklist", "/FI", "IMAGENAME eq RobloxPlayerBeta.exe", "/FO", "CSV", "/NH"],
-                text=True,
-                encoding="utf-8",
-                errors="ignore",
-            )
-        except Exception:
-            return None
-
-        pids = []
-        for line in output.splitlines():
-            if not line.strip():
-                continue
-            parts = [p.strip().strip('"') for p in line.split('","')]
-            if len(parts) < 2:
-                continue
-            pid = parts[1].strip('"')
-            if not pid.isdigit() or pid in existing:
-                continue
-            pids.append(int(pid))
-        return max(pids) if pids else None
-
-    def get_roblox_pids(self):
-        if sys.platform != "win32":
-            return []
-        try:
-            output = subprocess.check_output(
-                [
-                    "powershell",
-                    "-NoProfile",
-                    "-Command",
-                    "Get-Process RobloxPlayerBeta | Select-Object -ExpandProperty Id",
-                ],
-                text=True,
-                encoding="utf-8",
-                errors="ignore",
-            )
-            pids = [int(line.strip()) for line in output.splitlines() if line.strip().isdigit()]
-            if pids:
-                return pids
-        except Exception:
-            pass
-        try:
-            output = subprocess.check_output(
-                ["tasklist", "/FI", "IMAGENAME eq RobloxPlayerBeta.exe", "/FO", "CSV", "/NH"],
-                text=True,
-                encoding="utf-8",
-                errors="ignore",
-            )
-        except Exception:
-            return []
-        pids = []
-        for line in output.splitlines():
-            if not line.strip():
-                continue
-            parts = [p.strip().strip('"') for p in line.split('","')]
-            if len(parts) < 2:
-                continue
-            pid = parts[1].strip('"')
-            if pid.isdigit():
-                pids.append(int(pid))
-        return pids
-
-    def get_window_handle_for_pid(self, pid):
-        if sys.platform != "win32" or not pid:
-            return None
-
-        user32 = ctypes.windll.user32
-        hwnds = []
-
-        @ctypes.WINFUNCTYPE(ctypes.c_bool, wintypes.HWND, wintypes.LPARAM)
-        def enum_windows(hwnd, _):
-            if user32.IsWindowVisible(hwnd):
-                proc_id = wintypes.DWORD()
-                user32.GetWindowThreadProcessId(hwnd, ctypes.byref(proc_id))
-                if proc_id.value == pid:
-                    hwnds.append(hwnd)
-                    return False
-            return True
-
-        user32.EnumWindows(enum_windows, 0)
-        return hwnds[0] if hwnds else None
-
-    def hide_instance_window(self, instance_id):
-        if sys.platform != "win32" or not instance_id:
-            return
-        instance = next((i for i in self.active_instances if i["id"] == instance_id), None)
-        if not instance:
-            return
-        if not instance.get("hwnd"):
-            instance["pending_hide"] = True
-            return
-        ctypes.windll.user32.ShowWindow(instance["hwnd"], 0)
-
-    def show_instance_window(self, instance_id):
-        if sys.platform != "win32" or not instance_id:
-            return
-        instance = next((i for i in self.active_instances if i["id"] == instance_id), None)
-        if not instance:
-            return
-        if not instance.get("hwnd"):
-            instance["pending_show"] = True
-            return
-        ctypes.windll.user32.ShowWindow(instance["hwnd"], 5)
-
-    def hide_all_instances(self):
-        if sys.platform != "win32":
-            return
-        for instance in self.active_instances:
-            if instance.get("hwnd"):
-                ctypes.windll.user32.ShowWindow(instance["hwnd"], 0)
-            else:
-                instance["pending_hide"] = True
-
-    def show_all_instances(self):
-        if sys.platform != "win32":
-            return
-        for instance in self.active_instances:
-            if instance.get("hwnd"):
-                ctypes.windll.user32.ShowWindow(instance["hwnd"], 5)
-            else:
-                instance["pending_show"] = True
-
-    def minimize_all_instances(self):
-        if sys.platform != "win32":
-            return
-        for instance in self.active_instances:
-            if instance.get("hwnd"):
-                ctypes.windll.user32.ShowWindow(instance["hwnd"], 6)
-
-    def tile_instance_windows(self):
-        if sys.platform != "win32":
-            return
-
-        handles = [i.get("hwnd") for i in self.active_instances if i.get("hwnd")]
-        if not handles:
-            return
-
-        count = len(handles)
-        cols = int(count**0.5) or 1
-        rows = (count + cols - 1) // cols
-
-        user32 = ctypes.windll.user32
-        screen_w = user32.GetSystemMetrics(0)
-        screen_h = user32.GetSystemMetrics(1)
-        cell_w = max(200, screen_w // cols)
-        cell_h = max(200, screen_h // rows)
-
-        for index, hwnd in enumerate(handles):
-            row = index // cols
-            col = index % cols
-            x = col * cell_w
-            y = row * cell_h
-            user32.SetWindowPos(hwnd, 0, x, y, cell_w, cell_h, 0x0044)
-
-    def add_instance(self, acc, game_name, place_id, job_id):
-        instance = {
-            "id": str(uuid.uuid4()),
-            "username": acc.get("username", "Unknown"),
-            "game_name": game_name,
-            "place_id": place_id,
-            "job_id": job_id,
-            "pid": "Pending",
-            "hwnd": None,
-            "pending_hide": False,
-            "pending_show": False,
-            "started_at": time.time(),
-            "status": "Launching",
-        }
-        self.hide_instance_window(self.selected_instance_id)
-        self.active_instances.insert(0, instance)
-        self.selected_instance_id = instance["id"]
-        self.render_instances()
-        return instance["id"]
-
-    def add_scanned_instance(self, pid):
-        instance = {
-            "id": str(uuid.uuid4()),
-            "username": "Unknown",
-            "game_name": "Unknown Game",
-            "place_id": "Unknown",
-            "job_id": None,
-            "pid": pid,
-            "hwnd": self.get_window_handle_for_pid(pid),
-            "pending_hide": False,
-            "pending_show": False,
-            "started_at": time.time(),
-            "status": "Running",
-        }
-        self.active_instances.insert(0, instance)
-
-    def scan_instances(self, silent=False):
-        pids = set(self.get_roblox_pids())
-        tracked_pids = {i.get("pid") for i in self.active_instances if isinstance(i.get("pid"), int)}
-        for pid in sorted(pids - tracked_pids, reverse=True):
-            self.add_scanned_instance(pid)
-        if self.active_instances and not self.selected_instance_id:
-            self.selected_instance_id = self.active_instances[0]["id"]
-        if not silent:
-            self.render_instances()
-
-    def _pid_alive(self, pid):
-        if sys.platform != "win32":
-            return False
-        try:
-            process_query = 0x1000
-            handle = ctypes.windll.kernel32.OpenProcess(process_query, 0, pid)
-            if not handle:
-                return False
-            exit_code = wintypes.DWORD()
-            ctypes.windll.kernel32.GetExitCodeProcess(handle, ctypes.byref(exit_code))
-            ctypes.windll.kernel32.CloseHandle(handle)
-            return exit_code.value == 259
-        except Exception:
-            return False
-
-    def instances_refresh_loop(self):
-        while True:
-            self.scan_instances(silent=True)
-            self.cleanup_instances()
-            time.sleep(3)
-
-    def cleanup_instances(self):
-        removed = False
-        for instance in list(self.active_instances):
-            pid = instance.get("pid")
-            if isinstance(pid, int) and not self._pid_alive(pid):
-                self.active_instances.remove(instance)
-                removed = True
-        if removed:
-            if self.active_instances:
-                if self.selected_instance_id not in {i["id"] for i in self.active_instances}:
-                    self.selected_instance_id = self.active_instances[0]["id"]
-            else:
-                self.selected_instance_id = None
-            self.after(0, self.render_instances)
-
-    def resolve_instance_pid(self, instance_id):
-        for _ in range(12):
-            pid = self.get_latest_roblox_pid()
-            if pid:
-                self.update_instance_status(instance_id, "Running", pid)
-                return
-            time.sleep(1)
-        self.update_instance_status(instance_id, "Running")
-
-    def update_instance_status(self, instance_id, status, pid=None):
-        def _update():
-            for instance in self.active_instances:
-                if instance["id"] == instance_id:
-                    instance["status"] = status
-                    if pid:
-                        instance["pid"] = pid
-                        instance["hwnd"] = self.get_window_handle_for_pid(pid)
-                        if instance.get("pending_hide"):
-                            ctypes.windll.user32.ShowWindow(instance["hwnd"], 0)
-                            instance["pending_hide"] = False
-                        if instance.get("pending_show"):
-                            ctypes.windll.user32.ShowWindow(instance["hwnd"], 5)
-                            instance["pending_show"] = False
-                    elif status == "Failed" and instance.get("pid") == "Pending":
-                        instance["pid"] = "N/A"
-                    instance["updated_at"] = time.time()
-                    if instance_id == self.selected_instance_id:
-                        self.show_instance_window(instance_id)
-                    break
-            self.render_instances()
-        self.after(0, _update)
-
-    def select_instance(self, instance_id):
-        if instance_id == self.selected_instance_id:
-            return
-        self.hide_instance_window(self.selected_instance_id)
-        self.selected_instance_id = instance_id
-        self.show_instance_window(instance_id)
-        self.render_instances()
-
-    def remove_instance(self, instance_id):
-        self.active_instances = [i for i in self.active_instances if i["id"] != instance_id]
-        if self.selected_instance_id == instance_id:
-            self.selected_instance_id = self.active_instances[0]["id"] if self.active_instances else None
-            self.show_instance_window(self.selected_instance_id)
-        self.render_instances()
-
-    def clear_instances(self):
-        if sys.platform == "win32":
-            subprocess.call("taskkill /F /IM RobloxPlayerBeta.exe", shell=True)
-        self.hide_instance_window(self.selected_instance_id)
-        self.active_instances.clear()
-        self.selected_instance_id = None
-        self.render_instances()
-
-    def render_instances(self):
-        if not hasattr(self, "instances_list"):
-            return
-
-        for w in self.instances_list.winfo_children():
-            w.destroy()
-
-        if not self.active_instances:
-            ctk.CTkLabel(
-                self.instances_list,
-                text="No active instances yet.",
-                font=FontService.ui(11),
-                text_color=THEME["text_sub"],
-            ).pack(anchor="w", padx=6, pady=6)
-            return
-
-        status_palette = {
-            "Launching": THEME["warning"],
-            "Running": THEME["success"],
-            "Failed": THEME["danger"],
-        }
-
-        for instance in self.active_instances:
-            is_selected = instance["id"] == self.selected_instance_id
-
-            row = ctk.CTkFrame(
-                self.instances_list,
-                fg_color=THEME["card_bg"],
-                corner_radius=12,
-                border_width=1,
-                border_color=THEME["border"],
-            )
-            row.pack(fill="x", pady=3, padx=2)
-
-            info = ctk.CTkFrame(row, fg_color="transparent")
-            info.pack(side="left", fill="both", expand=True, padx=10, pady=4)
-
-            title_row = ctk.CTkFrame(info, fg_color="transparent")
-            title_row.pack(anchor="w")
-
-            status_text = instance.get("status", "Unknown")
-            status_color = status_palette.get(status_text, THEME["text_sub"])
-
-            name_button = ctk.CTkButton(
-                title_row,
-                text=instance.get("username", "Unknown"),
-                font=FontService.ui(10, "bold"),
-                fg_color="transparent",
-                hover=True,
-                text_color=THEME["text_main"],
-                command=lambda i=instance["id"]: self.select_instance(i),
-            )
-            name_button.pack(side="left")
-            ctk.CTkLabel(
-                title_row,
-                text=f" • {status_text}",
-                font=FontService.ui(9),
-                text_color=status_color,
-            ).pack(side="left")
-
-            if is_selected:
-                sub_row = ctk.CTkFrame(info, fg_color="transparent")
-                sub_row.pack(anchor="w")
-
-                game_name = instance.get("game_name") or "Unknown Game"
-                place_id = instance.get("place_id") or "Unknown"
-                job_id = instance.get("job_id")
-                pid = instance.get("pid") or "N/A"
-                details = f"{game_name} • Place {place_id} • PID {pid}"
-                if job_id:
-                    details = f"{details} • Job {job_id}"
-
-                ctk.CTkLabel(
-                    sub_row,
-                    text=details,
-                    font=FontService.ui(9),
-                    text_color=THEME["text_sub"],
-                ).pack(side="left")
-
-                started = Utils.time_ago(instance.get("started_at"))
-                ctk.CTkLabel(
-                    sub_row,
-                    text=f" • {started}",
-                    font=FontService.ui(9),
-                    text_color=THEME["text_sub"],
-                ).pack(side="left")
-
-
-            ActionBtn(
-                row,
-                text="✕",
-                width=28,
-                height=20,
-                type="subtle",
-                command=lambda i=instance["id"]: self.remove_instance(i),
-            ).pack(side="right", padx=8, pady=6)
         
     def open_game_selector_for(self, acc):
         def cb(pid, target_acc, game_name):
@@ -2263,27 +1869,22 @@ class App(ctk.CTk):
             acc["last_job_id"] = job
             acc["last_known_job"] = job 
             game_name = acc.get('last_played_name', 'Unknown Game')
-            acc["last_webhook_job"] = job
         else:
              game_name = self.api.get_game_name(pid)
              acc['last_played_name'] = game_name
              acc['game_id'] = pid
-             acc["suppress_next_webhook"] = True
              
         AccountStore.save(self.data)
         self.refresh_ui()
         WebhookService.send_launch_log(self.api, acc['username'], game_name, pid, job, acc.get('userid'), manual_track=False, robux=acc.get('robux','0'), server_info=server_info)
-        instance_id = self.add_instance(acc, game_name, pid, job)
-        threading.Thread(target=self._launch_t, args=(acc, pid, job, instance_id), daemon=True).start()
+        threading.Thread(target=self._launch_t, args=(acc, pid, job), daemon=True).start()
         
-    def _launch_t(self, acc, pid, job, instance_id):
+    def _launch_t(self, acc, pid, job):
         res = self.api.launch(acc, pid, acc.get('user_agent'), job, acc.get('proxy'))
-        if res is True or "Fishstrap" in str(res) or "Bloxstrap" in str(res):
+        if res is True or "Fishstrap" in str(res) or "Bloxstrap" in str(res): 
             self.safe_log(f"[SUCCESS] Launched {acc['username']}")
-            threading.Thread(target=self.resolve_instance_pid, args=(instance_id,), daemon=True).start()
         else: 
             self.safe_log(f"[ERROR] Launch Error: {res}")
-            self.update_instance_status(instance_id, "Failed")
         
     def login(self, acc): 
         threading.Thread(target=self.browser.open, args=(acc['username'], CryptoUtil.decrypt(acc.get('password')), acc.get('cookie'), "https://www.roblox.com/home", self.update_acc, "LOGIN_ONLY", acc.get('proxy')), daemon=True).start()
@@ -2468,12 +2069,9 @@ class App(ctk.CTk):
              self.safe_log("User not found.")
              return
 
-        p = self.api.get_presence(uid)
-
-        def _launch_from_userfinder(_acc_unused, job_id, place_override=None, server_info=None):
-            self.launch(acc, job_id, place_override=place_override, server_info=server_info)
-
-        self.after(0, lambda: UserFinderWindow(self, u, p if p else {}, _launch_from_userfinder))
+        p = self.api.check_own_presence(acc["cookie"], uid)
+        
+        self.after(0, lambda: UserFinderWindow(self, u, p if p else {}, lambda j, p: self.launch(acc, j, place_override=p)))
 
             
     def get_acc(self): 
