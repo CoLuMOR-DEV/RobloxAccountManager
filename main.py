@@ -729,40 +729,58 @@ class WebAutomation:
                         ]
                         month_value = random.choice(month_names)
                         day_value = random.randint(1, 28)
-                        def select_dropdown(el, value):
+                        def select_dropdown(el, value, prefer_text=False):
                             try:
-                                Select(el).select_by_value(str(value))
-                                return True
+                                selector = Select(el)
                             except Exception:
+                                return False
+                            attempts = []
+                            if prefer_text:
+                                attempts = [("text", selector.select_by_visible_text), ("value", selector.select_by_value)]
+                            else:
+                                attempts = [("value", selector.select_by_value), ("text", selector.select_by_visible_text)]
+                            for _, method in attempts:
                                 try:
-                                    Select(el).select_by_visible_text(str(value))
+                                    method(str(value))
                                     return True
                                 except Exception:
-                                    try:
-                                        el.click()
-                                        el.send_keys(str(value))
-                                        return True
-                                    except Exception:
-                                        return False
-                        select_dropdown(month_el, month_value)
+                                    continue
+                            try:
+                                driver.execute_script("arguments[0].scrollIntoView({block: 'center'});", el)
+                                el.click()
+                                el.send_keys(str(value))
+                                return True
+                            except Exception:
+                                return False
+                        select_dropdown(month_el, month_value, prefer_text=True)
                         select_dropdown(day_el, day_value)
                         if signup_year:
-                            select_dropdown(year_el, signup_year)
+                            select_dropdown(year_el, signup_year, prefer_text=True)
                         WebDriverWait(driver, 10).until(EC.presence_of_element_located((By.ID, "signup-username")))
                         driver.find_element(By.ID, "signup-username").send_keys(u); time.sleep(0.5)
                         driver.find_element(By.ID, "signup-password").send_keys(p); time.sleep(0.5)
                         if signup_gender in ("Male", "Female"):
                             gender_button_id = "FemaleButton" if signup_gender == "Female" else "MaleButton"
                             try:
-                                WebDriverWait(driver, 5).until(EC.element_to_be_clickable((By.ID, gender_button_id))).click()
+                                gender_button = WebDriverWait(driver, 5).until(
+                                    EC.element_to_be_clickable((By.ID, gender_button_id))
+                                )
+                                driver.execute_script("arguments[0].scrollIntoView({block: 'center'});", gender_button)
+                                gender_button.click()
                             except Exception:
                                 gender_label = "Female" if signup_gender == "Female" else "Male"
                                 try:
-                                    WebDriverWait(driver, 5).until(
-                                        EC.element_to_be_clickable((By.XPATH, f"//button[contains(@aria-label, '{gender_label}')]"))
-                                    ).click()
+                                    gender_button = WebDriverWait(driver, 5).until(
+                                        EC.element_to_be_clickable((By.XPATH, f"//button[@title='{gender_label}' or contains(@aria-label, '{gender_label}')]"))
+                                    )
+                                    driver.execute_script("arguments[0].scrollIntoView({block: 'center'});", gender_button)
+                                    gender_button.click()
                                 except Exception:
-                                    pass
+                                    try:
+                                        gender_button = driver.find_element(By.ID, gender_button_id)
+                                        driver.execute_script("arguments[0].click();", gender_button)
+                                    except Exception:
+                                        pass
                         signup_clicked = False
                         for by, selector in [
                             (By.ID, "signup-button"),
@@ -770,10 +788,19 @@ class WebAutomation:
                             (By.XPATH, "//input[@type='submit' and (contains(@value, 'Sign Up') or contains(@aria-label, 'Sign Up'))]"),
                         ]:
                             try:
-                                WebDriverWait(driver, 5).until(EC.element_to_be_clickable((by, selector))).click()
+                                signup_button = WebDriverWait(driver, 5).until(EC.element_to_be_clickable((by, selector)))
+                                driver.execute_script("arguments[0].scrollIntoView({block: 'center'});", signup_button)
+                                signup_button.click()
                                 signup_clicked = True
                                 break
                             except Exception:
+                                try:
+                                    signup_button = driver.find_element(by, selector)
+                                    driver.execute_script("arguments[0].click();", signup_button)
+                                    signup_clicked = True
+                                    break
+                                except Exception:
+                                    pass
                                 continue
                         if not signup_clicked:
                             self.log("Auto-signup warning: Sign Up button not found or not clickable.")
