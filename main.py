@@ -199,11 +199,6 @@ class Utils:
     def random_string(length=8):
         chars = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
         return "".join(random.choice(chars) for _ in range(length))
-
-    @staticmethod
-    def random_string(length=8):
-        chars = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
-        return "".join(random.choice(chars) for _ in range(length))
         
     @staticmethod
     def clean_game_cache():
@@ -691,7 +686,7 @@ class RobloxClient:
 
 class WebAutomation:
     def __init__(self, log_func): self.log = log_func
-    def open(self, u, p, cookie, target_url, cb, mode="NORMAL", proxy=None):
+    def open(self, u, p, cookie, target_url, cb, mode="NORMAL", proxy=None, signup_year=None, signup_gender=None):
         self.log(f"Opening Edge Browser ({mode})...")
         driver = None
         try:
@@ -724,9 +719,26 @@ class WebAutomation:
                 if u and p and mode == "SIGNUP":
                     self.log(f"Attempting auto-signup for {u}...")
                     try:
+                        WebDriverWait(driver, 10).until(EC.presence_of_element_located((By.ID, "MonthDropdown")))
+                        month_el = driver.find_element(By.ID, "MonthDropdown")
+                        day_el = driver.find_element(By.ID, "DayDropdown")
+                        year_el = driver.find_element(By.ID, "YearDropdown")
+                        month_el.click()
+                        month_el.send_keys(str(random.randint(1, 12)))
+                        day_el.click()
+                        day_el.send_keys(str(random.randint(1, 28)))
+                        if signup_year:
+                            year_el.click()
+                            year_el.send_keys(str(signup_year))
                         WebDriverWait(driver, 10).until(EC.presence_of_element_located((By.ID, "signup-username")))
                         driver.find_element(By.ID, "signup-username").send_keys(u); time.sleep(0.5)
                         driver.find_element(By.ID, "signup-password").send_keys(p); time.sleep(0.5)
+                        if signup_gender in ("Male", "Female"):
+                            gender_button_id = "FemaleButton" if signup_gender == "Female" else "MaleButton"
+                            try:
+                                driver.find_element(By.ID, gender_button_id).click()
+                            except Exception:
+                                pass
                     except Exception as e: self.log(f"Auto-signup failed: {e}")
             if mode == "LOGIN_ONLY":
                 start = time.time()
@@ -884,8 +896,51 @@ class CreateAccountWindow(ctk.CTkToplevel):
             text_color=THEME["text_main"],
         ).pack(pady=(4, 12))
 
+        self.easy_pass_var = ctk.BooleanVar(value=False)
+        ctk.CTkSwitch(
+            card,
+            text="Easy Password",
+            variable=self.easy_pass_var,
+            fg_color=THEME["card_hover"],
+            progress_color=THEME["accent"],
+            button_color=THEME["border"],
+            button_hover_color=THEME["separator"],
+            text_color=THEME["text_main"],
+        ).pack(pady=(0, 12))
+
+        ctk.CTkLabel(card, text="Birth Year", text_color=THEME["text_sub"], font=FontService.ui(12, "bold")).pack(pady=(6, 2))
+        years = [str(y) for y in range(1970, datetime.now().year - 5)]
+        self.year_var = ctk.StringVar(value=years[-1])
+        self.year_menu = ctk.CTkOptionMenu(
+            card,
+            values=years,
+            variable=self.year_var,
+            fg_color=THEME["input_bg"],
+            button_color=THEME["accent"],
+            button_hover_color=THEME["accent_hover"],
+            text_color=THEME["text_main"],
+            dropdown_text_color=THEME["text_main"],
+            dropdown_fg_color=THEME["card_bg"],
+        )
+        self.year_menu.pack(pady=6)
+
+        ctk.CTkLabel(card, text="Gender", text_color=THEME["text_sub"], font=FontService.ui(12, "bold")).pack(pady=(6, 2))
+        self.gender_var = ctk.StringVar(value="Random")
+        self.gender_menu = ctk.CTkOptionMenu(
+            card,
+            values=["Random", "Male", "Female"],
+            variable=self.gender_var,
+            fg_color=THEME["input_bg"],
+            button_color=THEME["accent"],
+            button_hover_color=THEME["accent_hover"],
+            text_color=THEME["text_main"],
+            dropdown_text_color=THEME["text_main"],
+            dropdown_fg_color=THEME["card_bg"],
+        )
+        self.gender_menu.pack(pady=6)
+
         ActionBtn(card, text="Create", type="success", command=self.submit).pack(fill="x", padx=12, pady=(0, 12))
-        Utils.center_window(self, 420, 430)
+        Utils.center_window(self, 420, 520)
 
     def submit(self):
         try:
@@ -895,7 +950,16 @@ class CreateAccountWindow(ctk.CTkToplevel):
         count = max(1, min(count, 20))
         base = self.base_entry.get().strip()
         password = self.password_entry.get().strip()
-        self.cb(count, base, self.random_names_var.get(), self.random_pass_var.get(), password)
+        self.cb(
+            count,
+            base,
+            self.random_names_var.get(),
+            self.random_pass_var.get(),
+            self.easy_pass_var.get(),
+            password,
+            int(self.year_var.get()),
+            self.gender_var.get(),
+        )
         self.destroy()
 
 
@@ -1676,13 +1740,22 @@ class App(ctk.CTk):
     def create_accounts(self):
         CreateAccountWindow(self, self.start_account_creation)
 
-    def start_account_creation(self, count, base_name, random_names, random_password, fallback_password):
+    def start_account_creation(self, count, base_name, random_names, random_password, easy_password, fallback_password, birth_year, gender):
         def _task():
             for i in range(count):
                 username = self.generate_username(base_name, random_names, i, count)
-                password = self.generate_password(random_password, fallback_password)
+                password = self.generate_password(random_password, easy_password, fallback_password)
                 self.safe_log(f"[INFO] Creating account {username}...")
-                self.browser.open(username, password, None, "https://www.roblox.com/signup", self.update_acc, mode="SIGNUP")
+                self.browser.open(
+                    username,
+                    password,
+                    None,
+                    "https://www.roblox.com/signup",
+                    self.update_acc,
+                    mode="SIGNUP",
+                    signup_year=birth_year,
+                    signup_gender=gender,
+                )
         threading.Thread(target=_task, daemon=True).start()
 
     def generate_username(self, base_name, random_names, index, total):
@@ -1693,8 +1766,10 @@ class App(ctk.CTk):
             return f"{base}{index + 1}"
         return base
 
-    def generate_password(self, random_password, fallback_password):
+    def generate_password(self, random_password, easy_password, fallback_password):
         if random_password:
+            if easy_password:
+                return f"{Utils.random_string(6)}{random.randint(10, 99)}"
             return f"{Utils.random_string(8)}!{random.randint(10, 99)}"
         return fallback_password or "Password123!"
 
