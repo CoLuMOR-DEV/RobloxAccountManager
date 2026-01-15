@@ -21,7 +21,7 @@ from selenium import webdriver
 from selenium.webdriver.edge.service import Service
 from selenium.webdriver.edge.options import Options as EdgeOptions
 from selenium.webdriver.common.by import By
-from selenium.webdriver.support.ui import WebDriverWait
+from selenium.webdriver.support.ui import WebDriverWait, Select
 from selenium.webdriver.support import expected_conditions as EC
 
 EDGE_BINARY_PATH = r"C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe"
@@ -723,22 +723,56 @@ class WebAutomation:
                         month_el = driver.find_element(By.ID, "MonthDropdown")
                         day_el = driver.find_element(By.ID, "DayDropdown")
                         year_el = driver.find_element(By.ID, "YearDropdown")
-                        month_el.click()
-                        month_el.send_keys(str(random.randint(1, 12)))
-                        day_el.click()
-                        day_el.send_keys(str(random.randint(1, 28)))
+                        month_value = random.randint(1, 12)
+                        day_value = random.randint(1, 28)
+                        def select_dropdown(el, value):
+                            try:
+                                Select(el).select_by_value(str(value))
+                                return True
+                            except Exception:
+                                try:
+                                    Select(el).select_by_visible_text(str(value))
+                                    return True
+                                except Exception:
+                                    try:
+                                        el.click()
+                                        el.send_keys(str(value))
+                                        return True
+                                    except Exception:
+                                        return False
+                        select_dropdown(month_el, month_value)
+                        select_dropdown(day_el, day_value)
                         if signup_year:
-                            year_el.click()
-                            year_el.send_keys(str(signup_year))
+                            select_dropdown(year_el, signup_year)
                         WebDriverWait(driver, 10).until(EC.presence_of_element_located((By.ID, "signup-username")))
                         driver.find_element(By.ID, "signup-username").send_keys(u); time.sleep(0.5)
                         driver.find_element(By.ID, "signup-password").send_keys(p); time.sleep(0.5)
                         if signup_gender in ("Male", "Female"):
                             gender_button_id = "FemaleButton" if signup_gender == "Female" else "MaleButton"
                             try:
-                                driver.find_element(By.ID, gender_button_id).click()
+                                WebDriverWait(driver, 5).until(EC.element_to_be_clickable((By.ID, gender_button_id))).click()
                             except Exception:
-                                pass
+                                gender_label = "Female" if signup_gender == "Female" else "Male"
+                                try:
+                                    WebDriverWait(driver, 5).until(
+                                        EC.element_to_be_clickable((By.XPATH, f"//button[contains(@aria-label, '{gender_label}')]"))
+                                    ).click()
+                                except Exception:
+                                    pass
+                        signup_clicked = False
+                        for by, selector in [
+                            (By.ID, "signup-button"),
+                            (By.XPATH, "//button[contains(., 'Sign Up')]"),
+                            (By.XPATH, "//input[@type='submit' and (contains(@value, 'Sign Up') or contains(@aria-label, 'Sign Up'))]"),
+                        ]:
+                            try:
+                                WebDriverWait(driver, 5).until(EC.element_to_be_clickable((by, selector))).click()
+                                signup_clicked = True
+                                break
+                            except Exception:
+                                continue
+                        if not signup_clicked:
+                            self.log("Auto-signup warning: Sign Up button not found or not clickable.")
                     except Exception as e: self.log(f"Auto-signup failed: {e}")
             if mode == "LOGIN_ONLY":
                 start = time.time()
@@ -940,7 +974,7 @@ class CreateAccountWindow(ctk.CTkToplevel):
         self.gender_menu.pack(pady=6)
 
         ActionBtn(card, text="Create", type="success", command=self.submit).pack(fill="x", padx=12, pady=(0, 12))
-        Utils.center_window(self, 420, 520)
+        Utils.center_window(self, 420, 620)
 
     def submit(self):
         try:
