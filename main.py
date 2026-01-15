@@ -2119,17 +2119,32 @@ class App(ctk.CTk):
                     if ":" in l:
                         u, p = l.split(":", 1)
                         self.data.append({"username": u.strip(), "password": CryptoUtil.encrypt(p.strip())})
+                AccountStore.save(self.data)
+                self.refresh_ui()
             else:
+                cookies = []
                 for l in text.splitlines():
                     line = l.strip()
                     if not line:
                         continue
                     if "ROBLOSECURITY" in line and "=" in line:
                         line = line.split("=", 1)[1].strip()
-                    cookie_hint = "".join(ch for ch in line[-6:] if ch.isalnum()) or Utils.random_string(6)
-                    self.data.append({"username": f"Cookie-{cookie_hint}", "cookie": line})
-            AccountStore.save(self.data)
-            self.refresh_ui()
+                    cookies.append(line)
+                if cookies:
+                    self.safe_log(f"[INFO] Importing {len(cookies)} cookies...")
+                    threading.Thread(target=self._import_cookie_accounts, args=(cookies,), daemon=True).start()
+
+    def _import_cookie_accounts(self, cookies):
+        for cookie in cookies:
+            stats = self.api.stats(cookie, DEFAULT_UA)
+            username = stats.get("display_name") if stats.get("status") == "OK" else None
+            if not username:
+                cookie_hint = "".join(ch for ch in cookie[-6:] if ch.isalnum()) or Utils.random_string(6)
+                username = f"Cookie-{cookie_hint}"
+            self.data.append({"username": username, "cookie": cookie, "user_agent": DEFAULT_UA, **stats})
+            self.safe_log(f"[SUCCESS] Imported {username}")
+        AccountStore.save(self.data)
+        self.after(0, self.refresh_ui)
             
     def open_settings(self): SettingsWindow(self, lambda:[ConfigService.load(), self.retheme(), self.refresh_ui()])
 
