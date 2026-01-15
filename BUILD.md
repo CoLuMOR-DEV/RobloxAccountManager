@@ -7,7 +7,7 @@
 ## Commands
 ```bash
 python -m pip install --upgrade pyinstaller
-pyinstaller --noconfirm --onefile --windowed --name "cx.manager" --icon icon.ico main.py
+python -m pyinstaller --noconfirm --onefile --windowed --name "cx.manager" --icon icon.ico main.py
 ```
 
 The executable will be in `dist/cx.manager.exe`.
