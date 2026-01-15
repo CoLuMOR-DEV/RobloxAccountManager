@@ -723,7 +723,11 @@ class WebAutomation:
                         month_el = driver.find_element(By.ID, "MonthDropdown")
                         day_el = driver.find_element(By.ID, "DayDropdown")
                         year_el = driver.find_element(By.ID, "YearDropdown")
-                        month_value = random.randint(1, 12)
+                        month_names = [
+                            "January", "February", "March", "April", "May", "June",
+                            "July", "August", "September", "October", "November", "December"
+                        ]
+                        month_value = random.choice(month_names)
                         day_value = random.randint(1, 28)
                         def select_dropdown(el, value):
                             try:
