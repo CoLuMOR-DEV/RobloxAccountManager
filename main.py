@@ -911,6 +911,48 @@ class InputDialog(ctk.CTkToplevel):
         return self.res
 
 
+class ImportAccountsDialog(ctk.CTkToplevel):
+    def __init__(self, parent):
+        super().__init__(parent)
+        self.title("Import Accounts")
+        self.res = None
+        self.grab_set()
+        self.configure(fg_color=THEME["bg"])
+
+        card = CardFrame(self, height=None)
+        card.pack(fill="both", expand=True, padx=16, pady=16)
+        card.pack_propagate(True)
+
+        tabs = ctk.CTkTabview(card, fg_color=THEME["card_bg"], segmented_button_selected_color=THEME["accent"])
+        tabs.pack(fill="both", expand=True, padx=12, pady=12)
+
+        user_tab = tabs.add("User:Pass")
+        cookie_tab = tabs.add("RobloSecurity Cookie")
+
+        ctk.CTkLabel(user_tab, text="Paste accounts (one per line)", text_color=THEME["text_sub"], font=FontService.ui(11, "bold")).pack(anchor="w", padx=10, pady=(10, 4))
+        self.user_text = ctk.CTkTextbox(user_tab, height=160, fg_color=THEME["input_bg"], text_color=THEME["text_main"], border_color=THEME["border"], border_width=1, corner_radius=12)
+        self.user_text.pack(fill="both", expand=True, padx=10, pady=(0, 10))
+
+        ctk.CTkLabel(cookie_tab, text="Paste .ROBLOSECURITY cookies (one per line)", text_color=THEME["text_sub"], font=FontService.ui(11, "bold")).pack(anchor="w", padx=10, pady=(10, 4))
+        self.cookie_text = ctk.CTkTextbox(cookie_tab, height=160, fg_color=THEME["input_bg"], text_color=THEME["text_main"], border_color=THEME["border"], border_width=1, corner_radius=12)
+        self.cookie_text.pack(fill="both", expand=True, padx=10, pady=(0, 10))
+
+        ActionBtn(card, text="OK", type="primary", command=lambda: self.ok(tabs.get())).pack(pady=(0, 10))
+        Utils.center_window(self, 520, 340)
+
+    def ok(self, tab_name):
+        if tab_name == "User:Pass":
+            text = self.user_text.get("1.0", "end").strip()
+        else:
+            text = self.cookie_text.get("1.0", "end").strip()
+        self.res = (tab_name, text) if text else None
+        self.destroy()
+
+    def ask(self):
+        self.wait_window()
+        return self.res
+
+
 class CreateAccountWindow(ctk.CTkToplevel):
     def __init__(self, parent, callback):
         super().__init__(parent)
@@ -2069,11 +2111,25 @@ class App(ctk.CTk):
         threading.Thread(target=run_parallel, daemon=True).start()
         
     def import_data(self):
-        t = InputDialog(self,"Import","User:Pass").ask()
-        if t: 
-            for l in t.splitlines():
-                if ":" in l: u, p = l.split(":", 1); self.data.append({"username":u.strip(), "password":CryptoUtil.encrypt(p.strip())})
-            AccountStore.save(self.data); self.refresh_ui()
+        result = ImportAccountsDialog(self).ask()
+        if result:
+            mode, text = result
+            if mode == "User:Pass":
+                for l in text.splitlines():
+                    if ":" in l:
+                        u, p = l.split(":", 1)
+                        self.data.append({"username": u.strip(), "password": CryptoUtil.encrypt(p.strip())})
+            else:
+                for l in text.splitlines():
+                    line = l.strip()
+                    if not line:
+                        continue
+                    if "ROBLOSECURITY" in line and "=" in line:
+                        line = line.split("=", 1)[1].strip()
+                    cookie_hint = "".join(ch for ch in line[-6:] if ch.isalnum()) or Utils.random_string(6)
+                    self.data.append({"username": f"Cookie-{cookie_hint}", "cookie": line})
+            AccountStore.save(self.data)
+            self.refresh_ui()
             
     def open_settings(self): SettingsWindow(self, lambda:[ConfigService.load(), self.retheme(), self.refresh_ui()])
 
