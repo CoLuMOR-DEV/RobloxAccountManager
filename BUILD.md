@@ -1,0 +1,13 @@
+# Build (PyInstaller)
+
+## Prereqs
+- Python 3.x
+- `icon.ico` placed in the repo root (same folder as `main.py`)
+
+## Commands
+```bash
+python -m pip install --upgrade pyinstaller
+pyinstaller --noconfirm --onefile --windowed --name "cx.manager" --icon icon.ico main.py
+```
+
+The executable will be in `dist/cx.manager.exe`.
