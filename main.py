@@ -1634,13 +1634,30 @@ class App(ctk.CTk):
         if self.sidebar_expanded:
             for widget, _opts in self.sidebar_items:
                 widget.pack_forget()
-            self.sidebar.configure(width=70)
-            self.sidebar_expanded = False
+            self.animate_sidebar_width(260, 70, on_complete=lambda: self._set_sidebar_state(False))
         else:
-            self.sidebar.configure(width=260)
             for widget, opts in self.sidebar_items:
                 widget.pack(**opts)
-            self.sidebar_expanded = True
+            self.animate_sidebar_width(70, 260, on_complete=lambda: self._set_sidebar_state(True))
+
+    def _set_sidebar_state(self, expanded):
+        self.sidebar_expanded = expanded
+
+    def animate_sidebar_width(self, start, end, on_complete=None):
+        steps = 10
+        duration_ms = 120
+        delta = (end - start) / steps
+
+        def _step(i, current):
+            self.sidebar.configure(width=int(current))
+            if i >= steps:
+                self.sidebar.configure(width=end)
+                if on_complete:
+                    on_complete()
+                return
+            self.after(int(duration_ms / steps), lambda: _step(i + 1, current + delta))
+
+        _step(0, start)
 
     def safe_log(self, m): 
         msg = Utils.timestamp_msg(m)
