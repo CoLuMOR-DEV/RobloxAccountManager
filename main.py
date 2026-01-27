@@ -969,12 +969,6 @@ class CreateAccountWindow(ctk.CTkToplevel):
         self.count_entry.insert(0, "1")
         self.count_entry.pack(pady=6)
 
-        count_controls = ctk.CTkFrame(card, fg_color="transparent")
-        count_controls.pack(pady=(0, 8))
-        ActionBtn(count_controls, text="Add 5", width=70, height=26, type="subtle", command=lambda: self.adjust_count(5)).pack(side="left", padx=4)
-        ActionBtn(count_controls, text="Add 7", width=70, height=26, type="subtle", command=lambda: self.adjust_count(7)).pack(side="left", padx=4)
-        ActionBtn(count_controls, text="Add 1", width=70, height=26, type="subtle", command=lambda: self.adjust_count(1)).pack(side="left", padx=4)
-
         ctk.CTkLabel(card, text="Base Name", text_color=THEME["text_sub"], font=FontService.ui(12, "bold")).pack(pady=(6, 2))
         self.base_entry = ctk.CTkEntry(card, width=260, fg_color=THEME["input_bg"], text_color=THEME["text_main"], border_color=THEME["border"], border_width=1, corner_radius=12)
         self.base_entry.insert(0, "user")
@@ -1054,15 +1048,6 @@ class CreateAccountWindow(ctk.CTkToplevel):
 
         ActionBtn(card, text="Create", type="success", command=self.submit).pack(fill="x", padx=12, pady=(0, 12))
         Utils.center_window(self, 420, 620)
-
-    def adjust_count(self, delta):
-        try:
-            count = int(self.count_entry.get().strip())
-        except ValueError:
-            count = 1
-        count = max(1, min(count + delta, 20))
-        self.count_entry.delete(0, "end")
-        self.count_entry.insert(0, str(count))
 
     def submit(self):
         try:
