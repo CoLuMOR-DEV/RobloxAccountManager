@@ -1104,6 +1104,7 @@ class GameSelectorWindow(ctk.CTkToplevel):
         
         self.search_entry = ctk.CTkEntry(top_frame, placeholder_text="Search games...", width=160, fg_color=THEME["input_bg"], text_color=THEME["text_main"], border_color=THEME["border"], border_width=1, corner_radius=12)
         self.search_entry.pack(side="left", fill="x", expand=True, padx=8)
+        self.search_entry.bind("<Return>", lambda _event: self.do_search(None))
         
         ActionBtn(top_frame, text="Search", width=80, type="primary", command=lambda: self.do_search(None)).pack(side="right", padx=5)
         
@@ -1385,7 +1386,7 @@ class App(ctk.CTk):
         ThemeService.apply()
 
         self.title(f"{APP_NAME}")
-        self.geometry("1150x780")
+        self.geometry("1220x840")
         self.configure(fg_color=THEME["bg"])
         
         self.api = RobloxClient(self.safe_log)
@@ -1486,7 +1487,7 @@ class App(ctk.CTk):
         )
         
         self.setup_tools()
-        Utils.center_window(self, 1150, 780)
+        Utils.center_window(self, 1220, 840)
         self.refresh_ui()
         
         threading.Thread(target=self.tracking_loop, daemon=True).start()
@@ -1612,9 +1613,14 @@ class App(ctk.CTk):
         strip.pack(side="left", fill="y")
         
         content = ctk.CTkFrame(c, fg_color="transparent")
-        content.pack(side="left", fill="both", expand=True, padx=8) 
+        content.pack(side="left", fill="both", expand=True, padx=8)
+        content.grid_columnconfigure(0, weight=1)
+        content.grid_columnconfigure(1, weight=0)
 
-        img_container = ctk.CTkFrame(content, fg_color="transparent")
+        left_col = ctk.CTkFrame(content, fg_color="transparent")
+        left_col.grid(row=0, column=0, sticky="nsew")
+
+        img_container = ctk.CTkFrame(left_col, fg_color="transparent")
         img_container.pack(side="left", pady=4)
         
         img_lbl = ctk.CTkLabel(img_container, text="", width=32)
@@ -1625,7 +1631,7 @@ class App(ctk.CTk):
         else: 
             AssetLoader.fetch_avatar_async(acc.get("userid"), f"{DIRS['cache']}/{acc.get('userid')}.png", lambda img, l=img_lbl: l.configure(image=img))
 
-        info_col = ctk.CTkFrame(content, fg_color="transparent")
+        info_col = ctk.CTkFrame(left_col, fg_color="transparent")
         info_col.pack(side="left", padx=(10, 0))
 
         name_row = ctk.CTkFrame(info_col, fg_color="transparent")
@@ -1647,8 +1653,9 @@ class App(ctk.CTk):
         else:
             ctk.CTkLabel(name_row, text=" • Not Verified", font=FontService.ui(11), text_color=THEME["text_sub"]).pack(side="left")
 
-        actions = ctk.CTkFrame(content, fg_color="transparent")
-        actions.pack(side="right")
+        actions = ctk.CTkFrame(content, fg_color="transparent", width=400)
+        actions.grid(row=0, column=1, sticky="e")
+        actions.grid_propagate(False)
         
         if is_verified:
             h = Utils.compute_account_health(acc)
