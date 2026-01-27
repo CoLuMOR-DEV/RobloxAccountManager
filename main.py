@@ -21,7 +21,7 @@ from selenium import webdriver
 from selenium.webdriver.edge.service import Service
 from selenium.webdriver.edge.options import Options as EdgeOptions
 from selenium.webdriver.common.by import By
-from selenium.webdriver.support.ui import WebDriverWait
+from selenium.webdriver.support.ui import WebDriverWait, Select
 from selenium.webdriver.support import expected_conditions as EC
 
 EDGE_BINARY_PATH = r"C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe"
@@ -54,13 +54,6 @@ CONFIG = {
     "use_fishstrap": True,
     "discord_webhook": ""
 }
-
-BOOTSTRAPPERS = [
-    {"name": "Fishstrap", "folder": "Fishstrap", "exe": "Fishstrap.exe"},
-    {"name": "Bloxstrap", "folder": "Bloxstrap", "exe": "Bloxstrap.exe"},
-    {"name": "Voidstrap", "folder": "Voidstrap", "exe": "Voidstrap.exe"},
-    {"name": "Froststrap", "folder": "Froststrap", "exe": "Froststrap.exe"},
-]
 
 THEME = {
     "bg": "#0b0b10", 
@@ -201,6 +194,11 @@ class Utils:
         if diff < 60: return "Just now"
         if diff < 3600: return f"{int(diff // 60)}m ago"
         return f"{int(diff // 3600)}h ago"
+
+    @staticmethod
+    def random_string(length=8):
+        chars = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
+        return "".join(random.choice(chars) for _ in range(length))
         
     @staticmethod
     def clean_game_cache():
@@ -517,15 +515,6 @@ class RobloxClient:
         s.headers.update({"User-Agent": DEFAULT_UA, "Origin": "https://www.roblox.com", "Referer": "https://www.roblox.com/"})
         if proxy: s.proxies.update({"http": proxy, "https": proxy})
         return s
-    
-    def _find_bootstrapper(self):
-        local_app_data = os.getenv("LOCALAPPDATA")
-        if not local_app_data: return None
-        for bootstrapper in BOOTSTRAPPERS:
-            path = os.path.join(local_app_data, bootstrapper["folder"], bootstrapper["exe"])
-            if os.path.exists(path):
-                return {**bootstrapper, "path": path}
-        return None
 
     def launch(self, acc, place, ua, job_id=None, proxy=None):
         cookie = acc.get("cookie")
@@ -550,13 +539,17 @@ class RobloxClient:
             url = f"https%3A%2F%2Fassetgame.roblox.com%2Fgame%2FPlaceLauncher.ashx%3Frequest%3D{req_type}%26browserTrackerId%3D{ts}%26placeId%3D{place}{job_p}%26isPlayTogetherGame%3Dfalse"
             
             if CONFIG.get("use_fishstrap", True):
-                bootstrapper = self._find_bootstrapper()
-                if bootstrapper:
+                local_app_data = os.getenv('LOCALAPPDATA')
+                fish_path = os.path.join(local_app_data, "Fishstrap", "Fishstrap.exe")
+                if not os.path.exists(fish_path): 
+                    fish_path = os.path.join(local_app_data, "Bloxstrap", "Bloxstrap.exe")
+                
+                if os.path.exists(fish_path):
                     launch_arg = f"roblox-player:1+launchmode:play+gameinfo:{ticket}+launchtime:{ts}+placelauncherurl:{url}"
-                    subprocess.Popen([bootstrapper["path"], launch_arg])
-                    return f"Launched via {bootstrapper['name']}"
+                    subprocess.Popen([fish_path, launch_arg])
+                    return "Launched via Fishstrap"
                 else:
-                    self.log("No supported bootstrappers found. Using default...")
+                    self.log("Fishstrap/Bloxstrap not found. Using default...")
 
             cmd = f"roblox-player:1+launchmode:play+gameinfo:{ticket}+launchtime:{ts}+placelauncherurl:{url}"
             os.startfile(cmd)
@@ -693,7 +686,7 @@ class RobloxClient:
 
 class WebAutomation:
     def __init__(self, log_func): self.log = log_func
-    def open(self, u, p, cookie, target_url, cb, mode="NORMAL", proxy=None):
+    def open(self, u, p, cookie, target_url, cb, mode="NORMAL", proxy=None, signup_year=None, signup_gender=None):
         self.log(f"Opening Edge Browser ({mode})...")
         driver = None
         try:
@@ -723,6 +716,95 @@ class WebAutomation:
                         driver.find_element(By.ID, "login-password").send_keys(p); time.sleep(0.5)
                         driver.find_element(By.ID, "login-button").click()
                     except Exception as e: self.log(f"Auto-login failed: {e}")
+                if u and p and mode == "SIGNUP":
+                    self.log(f"Attempting auto-signup for {u}...")
+                    try:
+                        WebDriverWait(driver, 10).until(EC.presence_of_element_located((By.ID, "MonthDropdown")))
+                        month_el = driver.find_element(By.ID, "MonthDropdown")
+                        day_el = driver.find_element(By.ID, "DayDropdown")
+                        year_el = driver.find_element(By.ID, "YearDropdown")
+                        month_names = [
+                            "January", "February", "March", "April", "May", "June",
+                            "July", "August", "September", "October", "November", "December"
+                        ]
+                        month_value = random.choice(month_names)
+                        day_value = random.randint(1, 28)
+                        def select_dropdown(el, value, prefer_text=False):
+                            try:
+                                selector = Select(el)
+                            except Exception:
+                                return False
+                            attempts = []
+                            if prefer_text:
+                                attempts = [("text", selector.select_by_visible_text), ("value", selector.select_by_value)]
+                            else:
+                                attempts = [("value", selector.select_by_value), ("text", selector.select_by_visible_text)]
+                            for _, method in attempts:
+                                try:
+                                    method(str(value))
+                                    return True
+                                except Exception:
+                                    continue
+                            try:
+                                driver.execute_script("arguments[0].scrollIntoView({block: 'center'});", el)
+                                el.click()
+                                el.send_keys(str(value))
+                                return True
+                            except Exception:
+                                return False
+                        select_dropdown(month_el, month_value, prefer_text=True)
+                        select_dropdown(day_el, day_value)
+                        if signup_year:
+                            select_dropdown(year_el, signup_year, prefer_text=True)
+                        WebDriverWait(driver, 10).until(EC.presence_of_element_located((By.ID, "signup-username")))
+                        driver.find_element(By.ID, "signup-username").send_keys(u); time.sleep(0.5)
+                        driver.find_element(By.ID, "signup-password").send_keys(p); time.sleep(0.5)
+                        if signup_gender in ("Male", "Female"):
+                            gender_button_id = "FemaleButton" if signup_gender == "Female" else "MaleButton"
+                            try:
+                                gender_button = WebDriverWait(driver, 5).until(
+                                    EC.element_to_be_clickable((By.ID, gender_button_id))
+                                )
+                                driver.execute_script("arguments[0].scrollIntoView({block: 'center'});", gender_button)
+                                gender_button.click()
+                            except Exception:
+                                gender_label = "Female" if signup_gender == "Female" else "Male"
+                                try:
+                                    gender_button = WebDriverWait(driver, 5).until(
+                                        EC.element_to_be_clickable((By.XPATH, f"//button[@title='{gender_label}' or contains(@aria-label, '{gender_label}')]"))
+                                    )
+                                    driver.execute_script("arguments[0].scrollIntoView({block: 'center'});", gender_button)
+                                    gender_button.click()
+                                except Exception:
+                                    try:
+                                        gender_button = driver.find_element(By.ID, gender_button_id)
+                                        driver.execute_script("arguments[0].click();", gender_button)
+                                    except Exception:
+                                        pass
+                        signup_clicked = False
+                        for by, selector in [
+                            (By.ID, "signup-button"),
+                            (By.XPATH, "//button[contains(., 'Sign Up')]"),
+                            (By.XPATH, "//input[@type='submit' and (contains(@value, 'Sign Up') or contains(@aria-label, 'Sign Up'))]"),
+                        ]:
+                            try:
+                                signup_button = WebDriverWait(driver, 5).until(EC.element_to_be_clickable((by, selector)))
+                                driver.execute_script("arguments[0].scrollIntoView({block: 'center'});", signup_button)
+                                signup_button.click()
+                                signup_clicked = True
+                                break
+                            except Exception:
+                                try:
+                                    signup_button = driver.find_element(by, selector)
+                                    driver.execute_script("arguments[0].click();", signup_button)
+                                    signup_clicked = True
+                                    break
+                                except Exception:
+                                    pass
+                                continue
+                        if not signup_clicked:
+                            self.log("Auto-signup warning: Sign Up button not found or not clickable.")
+                    except Exception as e: self.log(f"Auto-signup failed: {e}")
             if mode == "LOGIN_ONLY":
                 start = time.time()
                 while time.time() - start < 300:
@@ -732,6 +814,19 @@ class WebAutomation:
                             c = driver.get_cookies()
                             sec = next((x["value"] for x in c if x["name"] == ".ROBLOSECURITY"), None)
                             if sec: cb(u, p, sec, driver.execute_script("return navigator.userAgent;")); break
+                    except: break
+                    time.sleep(1)
+                driver.quit(); return
+            if mode == "SIGNUP":
+                start = time.time()
+                while time.time() - start < 600:
+                    try:
+                        if not driver.window_handles: break
+                        c = driver.get_cookies()
+                        sec = next((x["value"] for x in c if x["name"] == ".ROBLOSECURITY"), None)
+                        if sec:
+                            cb(u, p, sec, driver.execute_script("return navigator.userAgent;"))
+                            break
                     except: break
                     time.sleep(1)
                 driver.quit(); return
@@ -816,6 +911,165 @@ class InputDialog(ctk.CTkToplevel):
         return self.res
 
 
+class ImportAccountsDialog(ctk.CTkToplevel):
+    def __init__(self, parent):
+        super().__init__(parent)
+        self.title("Import Accounts")
+        self.res = None
+        self.grab_set()
+        self.configure(fg_color=THEME["bg"])
+
+        card = CardFrame(self, height=None)
+        card.pack(fill="both", expand=True, padx=16, pady=16)
+        card.pack_propagate(True)
+
+        tabs = ctk.CTkTabview(card, fg_color=THEME["card_bg"], segmented_button_selected_color=THEME["accent"])
+        tabs.pack(fill="both", expand=True, padx=12, pady=12)
+
+        user_tab = tabs.add("User:Pass")
+        cookie_tab = tabs.add("RobloSecurity Cookie")
+
+        ctk.CTkLabel(user_tab, text="Paste accounts (one per line)", text_color=THEME["text_sub"], font=FontService.ui(11, "bold")).pack(anchor="w", padx=10, pady=(10, 4))
+        self.user_text = ctk.CTkTextbox(user_tab, height=160, fg_color=THEME["input_bg"], text_color=THEME["text_main"], border_color=THEME["border"], border_width=1, corner_radius=12)
+        self.user_text.pack(fill="both", expand=True, padx=10, pady=(0, 10))
+
+        ctk.CTkLabel(cookie_tab, text="Paste .ROBLOSECURITY cookies (one per line)", text_color=THEME["text_sub"], font=FontService.ui(11, "bold")).pack(anchor="w", padx=10, pady=(10, 4))
+        self.cookie_text = ctk.CTkTextbox(cookie_tab, height=160, fg_color=THEME["input_bg"], text_color=THEME["text_main"], border_color=THEME["border"], border_width=1, corner_radius=12)
+        self.cookie_text.pack(fill="both", expand=True, padx=10, pady=(0, 10))
+
+        ActionBtn(card, text="OK", type="primary", command=lambda: self.ok(tabs.get())).pack(pady=(0, 10))
+        Utils.center_window(self, 520, 340)
+
+    def ok(self, tab_name):
+        if tab_name == "User:Pass":
+            text = self.user_text.get("1.0", "end").strip()
+        else:
+            text = self.cookie_text.get("1.0", "end").strip()
+        self.res = (tab_name, text) if text else None
+        self.destroy()
+
+    def ask(self):
+        self.wait_window()
+        return self.res
+
+
+class CreateAccountWindow(ctk.CTkToplevel):
+    def __init__(self, parent, callback):
+        super().__init__(parent)
+        self.title("Create Accounts")
+        self.cb = callback
+        self.grab_set()
+        self.configure(fg_color=THEME["bg"])
+
+        card = CardFrame(self, height=None)
+        card.pack(fill="both", expand=True, padx=20, pady=20)
+
+        ctk.CTkLabel(card, text="How Many Accounts", text_color=THEME["text_sub"], font=FontService.ui(12, "bold")).pack(pady=(12, 2))
+        self.count_entry = ctk.CTkEntry(card, width=200, fg_color=THEME["input_bg"], text_color=THEME["text_main"], border_color=THEME["border"], border_width=1, corner_radius=12)
+        self.count_entry.insert(0, "1")
+        self.count_entry.pack(pady=6)
+
+        ctk.CTkLabel(card, text="Base Name", text_color=THEME["text_sub"], font=FontService.ui(12, "bold")).pack(pady=(6, 2))
+        self.base_entry = ctk.CTkEntry(card, width=260, fg_color=THEME["input_bg"], text_color=THEME["text_main"], border_color=THEME["border"], border_width=1, corner_radius=12)
+        self.base_entry.insert(0, "user")
+        self.base_entry.pack(pady=6)
+
+        self.random_names_var = ctk.BooleanVar(value=True)
+        ctk.CTkSwitch(
+            card,
+            text="Random Names",
+            variable=self.random_names_var,
+            fg_color=THEME["card_hover"],
+            progress_color=THEME["accent"],
+            button_color=THEME["border"],
+            button_hover_color=THEME["separator"],
+            text_color=THEME["text_main"],
+        ).pack(pady=(4, 6))
+
+        ctk.CTkLabel(card, text="Password (if not random)", text_color=THEME["text_sub"], font=FontService.ui(12, "bold")).pack(pady=(6, 2))
+        self.password_entry = ctk.CTkEntry(card, width=260, fg_color=THEME["input_bg"], text_color=THEME["text_main"], border_color=THEME["border"], border_width=1, corner_radius=12, show="*")
+        self.password_entry.insert(0, "Password123!")
+        self.password_entry.pack(pady=6)
+
+        self.random_pass_var = ctk.BooleanVar(value=True)
+        ctk.CTkSwitch(
+            card,
+            text="Random Password",
+            variable=self.random_pass_var,
+            fg_color=THEME["card_hover"],
+            progress_color=THEME["accent"],
+            button_color=THEME["border"],
+            button_hover_color=THEME["separator"],
+            text_color=THEME["text_main"],
+        ).pack(pady=(4, 12))
+
+        self.easy_pass_var = ctk.BooleanVar(value=False)
+        ctk.CTkSwitch(
+            card,
+            text="Easy Password",
+            variable=self.easy_pass_var,
+            fg_color=THEME["card_hover"],
+            progress_color=THEME["accent"],
+            button_color=THEME["border"],
+            button_hover_color=THEME["separator"],
+            text_color=THEME["text_main"],
+        ).pack(pady=(0, 12))
+
+        ctk.CTkLabel(card, text="Birth Year", text_color=THEME["text_sub"], font=FontService.ui(12, "bold")).pack(pady=(6, 2))
+        years = [str(y) for y in range(1970, datetime.now().year - 5)]
+        self.year_var = ctk.StringVar(value=years[-1])
+        self.year_menu = ctk.CTkOptionMenu(
+            card,
+            values=years,
+            variable=self.year_var,
+            fg_color=THEME["input_bg"],
+            button_color=THEME["accent"],
+            button_hover_color=THEME["accent_hover"],
+            text_color=THEME["text_main"],
+            dropdown_text_color=THEME["text_main"],
+            dropdown_fg_color=THEME["card_bg"],
+        )
+        self.year_menu.pack(pady=6)
+
+        ctk.CTkLabel(card, text="Gender", text_color=THEME["text_sub"], font=FontService.ui(12, "bold")).pack(pady=(6, 2))
+        self.gender_var = ctk.StringVar(value="Random")
+        self.gender_menu = ctk.CTkOptionMenu(
+            card,
+            values=["Random", "Male", "Female"],
+            variable=self.gender_var,
+            fg_color=THEME["input_bg"],
+            button_color=THEME["accent"],
+            button_hover_color=THEME["accent_hover"],
+            text_color=THEME["text_main"],
+            dropdown_text_color=THEME["text_main"],
+            dropdown_fg_color=THEME["card_bg"],
+        )
+        self.gender_menu.pack(pady=6)
+
+        ActionBtn(card, text="Create", type="success", command=self.submit).pack(fill="x", padx=12, pady=(0, 12))
+        Utils.center_window(self, 420, 620)
+
+    def submit(self):
+        try:
+            count = int(self.count_entry.get().strip())
+        except ValueError:
+            count = 1
+        count = max(1, min(count, 20))
+        base = self.base_entry.get().strip()
+        password = self.password_entry.get().strip()
+        self.cb(
+            count,
+            base,
+            self.random_names_var.get(),
+            self.random_pass_var.get(),
+            self.easy_pass_var.get(),
+            password,
+            int(self.year_var.get()),
+            self.gender_var.get(),
+        )
+        self.destroy()
+
+
 class SettingsWindow(ctk.CTkToplevel):
     def __init__(self, parent, callback):
         super().__init__(parent)
@@ -845,7 +1099,7 @@ class SettingsWindow(ctk.CTkToplevel):
 
         self.fps_var = ctk.BooleanVar(value=CONFIG.get("fps_unlock", False))
         self.potato_var = ctk.BooleanVar(value=CONFIG.get("potato_mode", False))
-        self.bootstrapper_var = ctk.BooleanVar(value=CONFIG.get("use_fishstrap", True))
+        self.fish_var = ctk.BooleanVar(value=CONFIG.get("use_fishstrap", True))
 
         toggles = ctk.CTkFrame(wrap, fg_color="transparent")
         toggles.pack(fill="x", padx=16, pady=(2, 12))
@@ -854,8 +1108,8 @@ class SettingsWindow(ctk.CTkToplevel):
         self.fps_sw.pack(anchor="w", pady=6)
         self.potato_sw = ctk.CTkSwitch(toggles, text="Potato Mode (Low GFX)", variable=self.potato_var, fg_color=THEME["card_hover"], progress_color=THEME["accent"], button_color=THEME["border"], button_hover_color=THEME["separator"], text_color=THEME["text_main"])
         self.potato_sw.pack(anchor="w", pady=6)
-        self.bootstrapper_sw = ctk.CTkSwitch(toggles, text="Use Bootstrapper (Multi-Instance)", variable=self.bootstrapper_var, fg_color=THEME["card_hover"], progress_color=THEME["accent"], button_color=THEME["border"], button_hover_color=THEME["separator"], text_color=THEME["text_main"])
-        self.bootstrapper_sw.pack(anchor="w", pady=6)
+        self.fish_sw = ctk.CTkSwitch(toggles, text="Use Fishstrap (Multi-Instance)", variable=self.fish_var, fg_color=THEME["card_hover"], progress_color=THEME["accent"], button_color=THEME["border"], button_hover_color=THEME["separator"], text_color=THEME["text_main"])
+        self.fish_sw.pack(anchor="w", pady=6)
         
         ActionBtn(wrap, text="Test Webhook", type="warning", command=self.test_webhook).pack(fill="x", padx=16, pady=(0, 6))
 
@@ -876,7 +1130,7 @@ class SettingsWindow(ctk.CTkToplevel):
             FPSOptimizer.toggle_unlock(CONFIG["fps_unlock"])
         CONFIG["potato_mode"] = self.potato_var.get()
         PerformanceTweak.apply(CONFIG["potato_mode"])
-        CONFIG["use_fishstrap"] = self.bootstrapper_var.get()
+        CONFIG["use_fishstrap"] = self.fish_var.get()
         ConfigService.save()
         ThemeService.apply()
         self.callback()
@@ -1388,11 +1642,19 @@ class App(ctk.CTk):
         self.title(f"{APP_NAME}")
         self.geometry("1220x840")
         self.configure(fg_color=THEME["bg"])
+        icon_path = os.path.join(os.getcwd(), "icon.ico")
+        if os.path.exists(icon_path):
+            try:
+                self.iconbitmap(icon_path)
+            except Exception:
+                pass
         
         self.api = RobloxClient(self.safe_log)
         self.browser = WebAutomation(self.safe_log)
         self.data = AccountStore.load()
         self.windows = []
+        self.sidebar_expanded = True
+        self.sidebar_items = []
         
         first_acc = next((a for a in self.data if "cookie" in a), None)
         if first_acc:
@@ -1427,24 +1689,33 @@ class App(ctk.CTk):
             font=FontService.ui(11),
             text_color=THEME["text_sub"],
         ).pack(anchor="w", pady=(2, 0))
+        ActionBtn(
+            header,
+            text="⟷",
+            width=28,
+            height=24,
+            type="subtle",
+            command=self.toggle_sidebar,
+        ).pack(side="right")
         
-        self.side_btn(self.sidebar, "Import Accounts", self.import_data)
-        self.side_btn(self.sidebar, "Add Account", self.manual)
-        self.side_btn(self.sidebar, "Refresh All", self.refresh)
+        self.sidebar_items.append((self.side_btn(self.sidebar, "Import Accounts", self.import_data), {"pady": 7, "padx": 16}))
+        self.sidebar_items.append((self.side_btn(self.sidebar, "Add Account", self.manual), {"pady": 7, "padx": 16}))
+        self.sidebar_items.append((self.side_btn(self.sidebar, "Refresh All", self.refresh), {"pady": 7, "padx": 16}))
         
         def kill_all():
             if messagebox.askyesno("Panic", "Force close ALL Roblox instances?"):
                 subprocess.call("taskkill /F /IM RobloxPlayerBeta.exe", shell=True)
                 self.safe_log("[ALERT] Killed all Roblox processes.")
-        self.side_btn(self.sidebar, "Kill All Roblox", kill_all, color="danger")
+        self.sidebar_items.append((self.side_btn(self.sidebar, "Kill All Roblox", kill_all, color="danger"), {"pady": 7, "padx": 16}))
         
-        self.side_btn(self.sidebar, "Check Health", self.check_health)
-        self.side_btn(self.sidebar, "Settings", self.open_settings)
+        self.sidebar_items.append((self.side_btn(self.sidebar, "Create Account", self.create_accounts), {"pady": 7, "padx": 16}))
+        self.sidebar_items.append((self.side_btn(self.sidebar, "Settings", self.open_settings), {"pady": 7, "padx": 16}))
         
         self.status_bar = ctk.CTkLabel(
             self.sidebar, text="Ready", text_color=THEME["text_sub"], anchor="w", font=FontService.ui(11)
         )
         self.status_bar.pack(side="bottom", fill="x", padx=16, pady=(6, 6))
+        self.sidebar_items.append((self.status_bar, {"side": "bottom", "fill": "x", "padx": 16, "pady": (6, 6)}))
 
         self.console = ctk.CTkTextbox(
             self.sidebar,
@@ -1457,6 +1728,7 @@ class App(ctk.CTk):
             font=FontService.mono(11),
         )
         self.console.pack(fill="x", padx=16, pady=(0, 16), side="bottom")
+        self.sidebar_items.append((self.console, {"fill": "x", "padx": 16, "pady": (0, 16), "side": "bottom"}))
 
         self.main_area = ctk.CTkFrame(self, fg_color="transparent")
         self.main_area.grid(row=0, column=1, sticky="nsew", padx=20, pady=20)
@@ -1541,6 +1813,19 @@ class App(ctk.CTk):
             type=color
         )
         btn.pack(pady=7, padx=16)
+        return btn
+
+    def toggle_sidebar(self):
+        if self.sidebar_expanded:
+            for widget, _opts in self.sidebar_items:
+                widget.pack_forget()
+            self.sidebar.configure(width=70)
+            self.sidebar_expanded = False
+        else:
+            self.sidebar.configure(width=260)
+            for widget, opts in self.sidebar_items:
+                widget.pack(**opts)
+            self.sidebar_expanded = True
 
     def safe_log(self, m): 
         msg = Utils.timestamp_msg(m)
@@ -1559,6 +1844,42 @@ class App(ctk.CTk):
             self.after(0, self.refresh_ui)
             self.safe_log("[SUCCESS] Health Check Complete.")
         threading.Thread(target=run_check, daemon=True).start()
+
+    def create_accounts(self):
+        CreateAccountWindow(self, self.start_account_creation)
+
+    def start_account_creation(self, count, base_name, random_names, random_password, easy_password, fallback_password, birth_year, gender):
+        def _task():
+            for i in range(count):
+                username = self.generate_username(base_name, random_names, i, count)
+                password = self.generate_password(random_password, easy_password, fallback_password)
+                self.safe_log(f"[INFO] Creating account {username}...")
+                self.browser.open(
+                    username,
+                    password,
+                    None,
+                    "https://www.roblox.com/signup",
+                    self.update_acc,
+                    mode="SIGNUP",
+                    signup_year=birth_year,
+                    signup_gender=gender,
+                )
+        threading.Thread(target=_task, daemon=True).start()
+
+    def generate_username(self, base_name, random_names, index, total):
+        base = base_name or "user"
+        if random_names:
+            return f"{base}{Utils.random_string(6)}"
+        if total > 1:
+            return f"{base}{index + 1}"
+        return base
+
+    def generate_password(self, random_password, easy_password, fallback_password):
+        if random_password:
+            if easy_password:
+                return f"{Utils.random_string(6)}{random.randint(10, 99)}"
+            return f"{Utils.random_string(8)}!{random.randint(10, 99)}"
+        return fallback_password or "Password123!"
 
     def refresh_ui(self):
         for a in self.data:
@@ -1749,7 +2070,7 @@ class App(ctk.CTk):
         
     def _launch_t(self, acc, pid, job):
         res = self.api.launch(acc, pid, acc.get('user_agent'), job, acc.get('proxy'))
-        if res is True or "Launched via" in str(res):
+        if res is True or "Fishstrap" in str(res) or "Bloxstrap" in str(res): 
             self.safe_log(f"[SUCCESS] Launched {acc['username']}")
         else: 
             self.safe_log(f"[ERROR] Launch Error: {res}")
@@ -1797,11 +2118,40 @@ class App(ctk.CTk):
         threading.Thread(target=run_parallel, daemon=True).start()
         
     def import_data(self):
-        t = InputDialog(self,"Import","User:Pass").ask()
-        if t: 
-            for l in t.splitlines():
-                if ":" in l: u, p = l.split(":", 1); self.data.append({"username":u.strip(), "password":CryptoUtil.encrypt(p.strip())})
-            AccountStore.save(self.data); self.refresh_ui()
+        result = ImportAccountsDialog(self).ask()
+        if result:
+            mode, text = result
+            if mode == "User:Pass":
+                for l in text.splitlines():
+                    if ":" in l:
+                        u, p = l.split(":", 1)
+                        self.data.append({"username": u.strip(), "password": CryptoUtil.encrypt(p.strip())})
+                AccountStore.save(self.data)
+                self.refresh_ui()
+            else:
+                cookies = []
+                for l in text.splitlines():
+                    line = l.strip()
+                    if not line:
+                        continue
+                    if "ROBLOSECURITY" in line and "=" in line:
+                        line = line.split("=", 1)[1].strip()
+                    cookies.append(line)
+                if cookies:
+                    self.safe_log(f"[INFO] Importing {len(cookies)} cookies...")
+                    threading.Thread(target=self._import_cookie_accounts, args=(cookies,), daemon=True).start()
+
+    def _import_cookie_accounts(self, cookies):
+        for cookie in cookies:
+            stats = self.api.stats(cookie, DEFAULT_UA)
+            username = stats.get("display_name") if stats.get("status") == "OK" else None
+            if not username:
+                cookie_hint = "".join(ch for ch in cookie[-6:] if ch.isalnum()) or Utils.random_string(6)
+                username = f"Cookie-{cookie_hint}"
+            self.data.append({"username": username, "cookie": cookie, "user_agent": DEFAULT_UA, **stats})
+            self.safe_log(f"[SUCCESS] Imported {username}")
+        AccountStore.save(self.data)
+        self.after(0, self.refresh_ui)
             
     def open_settings(self): SettingsWindow(self, lambda:[ConfigService.load(), self.retheme(), self.refresh_ui()])
 
