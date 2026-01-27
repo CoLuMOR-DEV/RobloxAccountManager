@@ -55,6 +55,13 @@ CONFIG = {
     "discord_webhook": ""
 }
 
+BOOTSTRAPPERS = [
+    {"name": "Fishstrap", "folder": "Fishstrap", "exe": "Fishstrap.exe"},
+    {"name": "Bloxstrap", "folder": "Bloxstrap", "exe": "Bloxstrap.exe"},
+    {"name": "Voidstrap", "folder": "Voidstrap", "exe": "Voidstrap.exe"},
+    {"name": "Froststrap", "folder": "Froststrap", "exe": "Froststrap.exe"},
+]
+
 THEME = {
     "bg": "#0b0b10", 
     "sidebar": "#0b0b10", 
@@ -510,6 +517,15 @@ class RobloxClient:
         s.headers.update({"User-Agent": DEFAULT_UA, "Origin": "https://www.roblox.com", "Referer": "https://www.roblox.com/"})
         if proxy: s.proxies.update({"http": proxy, "https": proxy})
         return s
+    
+    def _find_bootstrapper(self):
+        local_app_data = os.getenv("LOCALAPPDATA")
+        if not local_app_data: return None
+        for bootstrapper in BOOTSTRAPPERS:
+            path = os.path.join(local_app_data, bootstrapper["folder"], bootstrapper["exe"])
+            if os.path.exists(path):
+                return {**bootstrapper, "path": path}
+        return None
 
     def launch(self, acc, place, ua, job_id=None, proxy=None):
         cookie = acc.get("cookie")
@@ -534,17 +550,13 @@ class RobloxClient:
             url = f"https%3A%2F%2Fassetgame.roblox.com%2Fgame%2FPlaceLauncher.ashx%3Frequest%3D{req_type}%26browserTrackerId%3D{ts}%26placeId%3D{place}{job_p}%26isPlayTogetherGame%3Dfalse"
             
             if CONFIG.get("use_fishstrap", True):
-                local_app_data = os.getenv('LOCALAPPDATA')
-                fish_path = os.path.join(local_app_data, "Fishstrap", "Fishstrap.exe")
-                if not os.path.exists(fish_path): 
-                    fish_path = os.path.join(local_app_data, "Bloxstrap", "Bloxstrap.exe")
-                
-                if os.path.exists(fish_path):
+                bootstrapper = self._find_bootstrapper()
+                if bootstrapper:
                     launch_arg = f"roblox-player:1+launchmode:play+gameinfo:{ticket}+launchtime:{ts}+placelauncherurl:{url}"
-                    subprocess.Popen([fish_path, launch_arg])
-                    return "Launched via Fishstrap"
+                    subprocess.Popen([bootstrapper["path"], launch_arg])
+                    return f"Launched via {bootstrapper['name']}"
                 else:
-                    self.log("Fishstrap/Bloxstrap not found. Using default...")
+                    self.log("No supported bootstrappers found. Using default...")
 
             cmd = f"roblox-player:1+launchmode:play+gameinfo:{ticket}+launchtime:{ts}+placelauncherurl:{url}"
             os.startfile(cmd)
@@ -833,7 +845,7 @@ class SettingsWindow(ctk.CTkToplevel):
 
         self.fps_var = ctk.BooleanVar(value=CONFIG.get("fps_unlock", False))
         self.potato_var = ctk.BooleanVar(value=CONFIG.get("potato_mode", False))
-        self.fish_var = ctk.BooleanVar(value=CONFIG.get("use_fishstrap", True))
+        self.bootstrapper_var = ctk.BooleanVar(value=CONFIG.get("use_fishstrap", True))
 
         toggles = ctk.CTkFrame(wrap, fg_color="transparent")
         toggles.pack(fill="x", padx=16, pady=(2, 12))
@@ -842,8 +854,8 @@ class SettingsWindow(ctk.CTkToplevel):
         self.fps_sw.pack(anchor="w", pady=6)
         self.potato_sw = ctk.CTkSwitch(toggles, text="Potato Mode (Low GFX)", variable=self.potato_var, fg_color=THEME["card_hover"], progress_color=THEME["accent"], button_color=THEME["border"], button_hover_color=THEME["separator"], text_color=THEME["text_main"])
         self.potato_sw.pack(anchor="w", pady=6)
-        self.fish_sw = ctk.CTkSwitch(toggles, text="Use Fishstrap (Multi-Instance)", variable=self.fish_var, fg_color=THEME["card_hover"], progress_color=THEME["accent"], button_color=THEME["border"], button_hover_color=THEME["separator"], text_color=THEME["text_main"])
-        self.fish_sw.pack(anchor="w", pady=6)
+        self.bootstrapper_sw = ctk.CTkSwitch(toggles, text="Use Bootstrapper (Multi-Instance)", variable=self.bootstrapper_var, fg_color=THEME["card_hover"], progress_color=THEME["accent"], button_color=THEME["border"], button_hover_color=THEME["separator"], text_color=THEME["text_main"])
+        self.bootstrapper_sw.pack(anchor="w", pady=6)
         
         ActionBtn(wrap, text="Test Webhook", type="warning", command=self.test_webhook).pack(fill="x", padx=16, pady=(0, 6))
 
@@ -864,7 +876,7 @@ class SettingsWindow(ctk.CTkToplevel):
             FPSOptimizer.toggle_unlock(CONFIG["fps_unlock"])
         CONFIG["potato_mode"] = self.potato_var.get()
         PerformanceTweak.apply(CONFIG["potato_mode"])
-        CONFIG["use_fishstrap"] = self.fish_var.get()
+        CONFIG["use_fishstrap"] = self.bootstrapper_var.get()
         ConfigService.save()
         ThemeService.apply()
         self.callback()
@@ -1730,7 +1742,7 @@ class App(ctk.CTk):
         
     def _launch_t(self, acc, pid, job):
         res = self.api.launch(acc, pid, acc.get('user_agent'), job, acc.get('proxy'))
-        if res is True or "Fishstrap" in str(res) or "Bloxstrap" in str(res): 
+        if res is True or "Launched via" in str(res):
             self.safe_log(f"[SUCCESS] Launched {acc['username']}")
         else: 
             self.safe_log(f"[ERROR] Launch Error: {res}")
