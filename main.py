@@ -51,7 +51,10 @@ CONFIG = {
     "fps_unlock": False,
     "potato_mode": False,
     "multi_session": False,
-    "use_fishstrap": True,
+    "use_bootstrapper": True,
+    "bootstrapper_preference": "Auto",
+    "presence_tracking": True,
+    "presence_interval": 10,
     "discord_webhook": ""
 }
 
@@ -369,6 +372,38 @@ class CryptoUtil:
     def decrypt(t): return base64.b64decode(t[4:]).decode() if t and t.startswith("ENC_") else t
 
 
+class BootstrapperService:
+    CANDIDATES = [
+        ("Bloxstrap", ("Bloxstrap", "Bloxstrap.exe")),
+        ("Fishstrap", ("Fishstrap", "Fishstrap.exe")),
+        ("Voidstrap", ("Voidstrap", "Voidstrap.exe")),
+        ("Froststrap", ("Froststrap", "Froststrap.exe")),
+        ("Plexity", ("Plexity", "Plexity.exe")),
+    ]
+
+    @classmethod
+    def get_names(cls):
+        return [name for name, _ in cls.CANDIDATES]
+
+    @classmethod
+    def find(cls, preference="Auto"):
+        local_app_data = os.getenv("LOCALAPPDATA")
+        if not local_app_data:
+            return None
+        order = []
+        if preference and preference != "Auto" and preference in cls.get_names():
+            order.append(preference)
+        for name in cls.get_names():
+            if name not in order:
+                order.append(name)
+        for name in order:
+            folder, exe = dict(cls.CANDIDATES)[name]
+            path = os.path.join(local_app_data, folder, exe)
+            if os.path.exists(path):
+                return name, path
+        return None
+
+
 class ConfigService:
     @staticmethod
     def load():
@@ -381,7 +416,13 @@ class ConfigService:
         CONFIG.setdefault("accent_color", "Blue")
         CONFIG.setdefault("fps_unlock", False)
         CONFIG.setdefault("potato_mode", False)
-        CONFIG.setdefault("use_fishstrap", True)
+        if "use_bootstrapper" not in CONFIG and "use_fishstrap" in CONFIG:
+            CONFIG["use_bootstrapper"] = CONFIG.get("use_fishstrap", True)
+        CONFIG.setdefault("use_bootstrapper", True)
+        CONFIG.setdefault("bootstrapper_preference", "Auto")
+        CONFIG.setdefault("presence_tracking", True)
+        CONFIG.setdefault("presence_interval", 10)
+        CONFIG.pop("use_fishstrap", None)
         CONFIG.setdefault("discord_webhook", "")
         ThemeService.apply()
 
@@ -538,18 +579,15 @@ class RobloxClient:
             
             url = f"https%3A%2F%2Fassetgame.roblox.com%2Fgame%2FPlaceLauncher.ashx%3Frequest%3D{req_type}%26browserTrackerId%3D{ts}%26placeId%3D{place}{job_p}%26isPlayTogetherGame%3Dfalse"
             
-            if CONFIG.get("use_fishstrap", True):
-                local_app_data = os.getenv('LOCALAPPDATA')
-                fish_path = os.path.join(local_app_data, "Fishstrap", "Fishstrap.exe")
-                if not os.path.exists(fish_path): 
-                    fish_path = os.path.join(local_app_data, "Bloxstrap", "Bloxstrap.exe")
-                
-                if os.path.exists(fish_path):
+            if CONFIG.get("use_bootstrapper", True):
+                preference = CONFIG.get("bootstrapper_preference", "Auto")
+                found = BootstrapperService.find(preference)
+                if found:
+                    name, path = found
                     launch_arg = f"roblox-player:1+launchmode:play+gameinfo:{ticket}+launchtime:{ts}+placelauncherurl:{url}"
-                    subprocess.Popen([fish_path, launch_arg])
-                    return "Launched via Fishstrap"
-                else:
-                    self.log("Fishstrap/Bloxstrap not found. Using default...")
+                    subprocess.Popen([path, launch_arg])
+                    return f"Launched via {name}"
+                self.log("No supported bootstrappers found. Using default...")
 
             cmd = f"roblox-player:1+launchmode:play+gameinfo:{ticket}+launchtime:{ts}+placelauncherurl:{url}"
             os.startfile(cmd)
@@ -1099,7 +1137,9 @@ class SettingsWindow(ctk.CTkToplevel):
 
         self.fps_var = ctk.BooleanVar(value=CONFIG.get("fps_unlock", False))
         self.potato_var = ctk.BooleanVar(value=CONFIG.get("potato_mode", False))
-        self.fish_var = ctk.BooleanVar(value=CONFIG.get("use_fishstrap", True))
+        self.bootstrapper_var = ctk.BooleanVar(value=CONFIG.get("use_bootstrapper", True))
+        self.bootstrapper_pref = ctk.StringVar(value=CONFIG.get("bootstrapper_preference", "Auto"))
+        self.presence_var = ctk.BooleanVar(value=CONFIG.get("presence_tracking", True))
 
         toggles = ctk.CTkFrame(wrap, fg_color="transparent")
         toggles.pack(fill="x", padx=16, pady=(2, 12))
@@ -1108,13 +1148,38 @@ class SettingsWindow(ctk.CTkToplevel):
         self.fps_sw.pack(anchor="w", pady=6)
         self.potato_sw = ctk.CTkSwitch(toggles, text="Potato Mode (Low GFX)", variable=self.potato_var, fg_color=THEME["card_hover"], progress_color=THEME["accent"], button_color=THEME["border"], button_hover_color=THEME["separator"], text_color=THEME["text_main"])
         self.potato_sw.pack(anchor="w", pady=6)
-        self.fish_sw = ctk.CTkSwitch(toggles, text="Use Fishstrap (Multi-Instance)", variable=self.fish_var, fg_color=THEME["card_hover"], progress_color=THEME["accent"], button_color=THEME["border"], button_hover_color=THEME["separator"], text_color=THEME["text_main"])
-        self.fish_sw.pack(anchor="w", pady=6)
+
+        ctk.CTkLabel(wrap, text="Multi-Instance", text_color=THEME["text_sub"], font=FontService.ui(12, "bold")).pack(anchor="w", padx=16, pady=(6, 6))
+        self.bootstrapper_sw = ctk.CTkSwitch(wrap, text="Use Bootstrappers (Multi-Instance)", variable=self.bootstrapper_var, fg_color=THEME["card_hover"], progress_color=THEME["accent"], button_color=THEME["border"], button_hover_color=THEME["separator"], text_color=THEME["text_main"])
+        self.bootstrapper_sw.pack(anchor="w", padx=16, pady=6)
+
+        ctk.CTkLabel(wrap, text="Preferred Bootstrapper", text_color=THEME["text_sub"], font=FontService.ui(12, "bold")).pack(anchor="w", padx=16, pady=(6, 6))
+        self.bootstrapper_menu = ctk.CTkOptionMenu(
+            wrap,
+            variable=self.bootstrapper_pref,
+            values=["Auto"] + BootstrapperService.get_names(),
+            fg_color=THEME["input_bg"],
+            button_color=THEME["accent"],
+            button_hover_color=THEME["accent_hover"],
+            text_color=THEME["text_main"],
+            dropdown_text_color=THEME["text_main"],
+            dropdown_fg_color=THEME["card_bg"],
+        )
+        self.bootstrapper_menu.pack(fill="x", padx=16, pady=(0, 12))
+
+        ctk.CTkLabel(wrap, text="Background Tracking", text_color=THEME["text_sub"], font=FontService.ui(12, "bold")).pack(anchor="w", padx=16, pady=(6, 6))
+        self.presence_sw = ctk.CTkSwitch(wrap, text="Presence Tracking", variable=self.presence_var, fg_color=THEME["card_hover"], progress_color=THEME["accent"], button_color=THEME["border"], button_hover_color=THEME["separator"], text_color=THEME["text_main"])
+        self.presence_sw.pack(anchor="w", padx=16, pady=6)
+
+        ctk.CTkLabel(wrap, text="Presence Check Interval (sec)", text_color=THEME["text_sub"], font=FontService.ui(12, "bold")).pack(anchor="w", padx=16, pady=(6, 6))
+        self.presence_interval_entry = ctk.CTkEntry(wrap, fg_color=THEME["input_bg"], text_color=THEME["text_main"], border_color=THEME["border"], border_width=1, corner_radius=12)
+        self.presence_interval_entry.insert(0, str(CONFIG.get("presence_interval", 10)))
+        self.presence_interval_entry.pack(fill="x", padx=16, pady=(0, 12))
         
         ActionBtn(wrap, text="Test Webhook", type="warning", command=self.test_webhook).pack(fill="x", padx=16, pady=(0, 6))
 
         ActionBtn(wrap, text="Save & Apply", type="primary", command=self.save).pack(fill="x", padx=16, pady=(6, 14))
-        Utils.center_window(self, 380, 600)
+        Utils.center_window(self, 380, 740)
     
     def test_webhook(self):
         url = self.webhook_entry.get().strip()
@@ -1130,7 +1195,14 @@ class SettingsWindow(ctk.CTkToplevel):
             FPSOptimizer.toggle_unlock(CONFIG["fps_unlock"])
         CONFIG["potato_mode"] = self.potato_var.get()
         PerformanceTweak.apply(CONFIG["potato_mode"])
-        CONFIG["use_fishstrap"] = self.fish_var.get()
+        CONFIG["use_bootstrapper"] = self.bootstrapper_var.get()
+        CONFIG["bootstrapper_preference"] = self.bootstrapper_pref.get()
+        CONFIG["presence_tracking"] = self.presence_var.get()
+        try:
+            interval = int(self.presence_interval_entry.get().strip())
+        except ValueError:
+            interval = 10
+        CONFIG["presence_interval"] = max(5, min(interval, 300))
         ConfigService.save()
         ThemeService.apply()
         self.callback()
@@ -1766,6 +1838,14 @@ class App(ctk.CTk):
 
     def tracking_loop(self):
         while True:
+            if not CONFIG.get("presence_tracking", True):
+                time.sleep(5)
+                continue
+            try:
+                interval = int(CONFIG.get("presence_interval", 10))
+            except (TypeError, ValueError):
+                interval = 10
+            interval = max(5, min(interval, 300))
             for acc in self.data:
                 if "cookie" in acc:
                     uid = acc.get("userid")
@@ -1793,8 +1873,8 @@ class App(ctk.CTk):
                                     robux=acc.get('robux','0')
                                 )
                                 self.safe_log(f"[TRACK] {acc['username']} moved to {game_name}")
-            
-            time.sleep(10)
+
+            time.sleep(interval)
 
     def side_btn(self, parent, text, cmd, color="primary"):
         btn = ActionBtn(
@@ -2070,7 +2150,7 @@ class App(ctk.CTk):
         
     def _launch_t(self, acc, pid, job):
         res = self.api.launch(acc, pid, acc.get('user_agent'), job, acc.get('proxy'))
-        if res is True or "Fishstrap" in str(res) or "Bloxstrap" in str(res): 
+        if res is True or (isinstance(res, str) and res.startswith("Launched via")): 
             self.safe_log(f"[SUCCESS] Launched {acc['username']}")
         else: 
             self.safe_log(f"[ERROR] Launch Error: {res}")
