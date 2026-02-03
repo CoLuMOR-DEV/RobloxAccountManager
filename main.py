@@ -1769,6 +1769,8 @@ class App(ctk.CTk):
         self._render_started_at = None
         self._render_min_duration = 1.2
         self._render_finish_id = None
+        self._render_force_id = None
+        self._render_force_timeout = 8.0
         self._loading_phrases = [
             "Warming up session...",
             "Loading profiles...",
@@ -2257,6 +2259,13 @@ class App(ctk.CTk):
             except Exception:
                 pass
             self._render_finish_id = None
+        if self._render_force_id is not None:
+            try:
+                self.after_cancel(self._render_force_id)
+            except Exception:
+                pass
+            self._render_force_id = None
+        self._render_force_id = self.after(int(self._render_force_timeout * 1000), self._force_finish_render)
         self._update_loading_phrase()
         self.loading_progress.configure(text=f"0/{total}")
         self.loading_bar.set(0)
@@ -2408,6 +2417,12 @@ class App(ctk.CTk):
 
     def _finalize_render(self):
         self._render_finish_id = None
+        if self._render_force_id is not None:
+            try:
+                self.after_cancel(self._render_force_id)
+            except Exception:
+                pass
+            self._render_force_id = None
         self.loading_bar.set(1.0)
         if self._splash_bar:
             self._splash_bar.set(1.0)
@@ -2419,6 +2434,16 @@ class App(ctk.CTk):
         if hasattr(self, 'job_acc_menu'):
             self.job_acc_menu.configure(values=acc_names)
             if self.job_acc_var.get() not in acc_names: self.job_acc_var.set(acc_names[0])
+
+    def _force_finish_render(self):
+        if self._render_finish_id is not None:
+            try:
+                self.after_cancel(self._render_finish_id)
+            except Exception:
+                pass
+            self._render_finish_id = None
+        self._render_force_id = None
+        self._finalize_render()
 
     def _start_loading_animation(self):
         return
