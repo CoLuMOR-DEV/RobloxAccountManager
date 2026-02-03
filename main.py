@@ -214,6 +214,18 @@ class Utils:
             return None
 
     @staticmethod
+    def created_timestamp(created_at):
+        if not created_at:
+            return None
+        try:
+            if isinstance(created_at, (int, float)):
+                return float(created_at)
+            created_dt = datetime.fromisoformat(str(created_at).replace("Z", "+00:00"))
+            return created_dt.timestamp()
+        except Exception:
+            return None
+
+    @staticmethod
     def random_string(length=8):
         chars = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
         return "".join(random.choice(chars) for _ in range(length))
@@ -1851,9 +1863,29 @@ class App(ctk.CTk):
         self.tabs.pack(fill="both", expand=True)
         self.tabs.add("Accounts")
         self.tabs.add("Game Tools")
+
+        accounts_tab = self.tabs.tab("Accounts")
+        controls = ctk.CTkFrame(accounts_tab, fg_color="transparent")
+        controls.pack(fill="x", padx=6, pady=(0, 6))
+        ctk.CTkLabel(controls, text="Sort by:", text_color=THEME["text_sub"], font=FontService.ui(11)).pack(side="left")
+        self.sort_var = ctk.StringVar(value="Name (A-Z)")
+        sort_options = ["Name (A-Z)", "Name (Z-A)", "Oldest Account First", "Newest Account First"]
+        self.sort_menu = ctk.CTkOptionMenu(
+            controls,
+            values=sort_options,
+            variable=self.sort_var,
+            command=lambda _: self.refresh_ui(),
+            fg_color=THEME["card_bg"],
+            button_color=THEME["card_bg"],
+            button_hover_color=THEME["card_hover"],
+            text_color=THEME["text_main"],
+            dropdown_fg_color=THEME["card_bg"],
+            dropdown_hover_color=THEME["card_hover"],
+        )
+        self.sort_menu.pack(side="left", padx=8)
         
         self.scroll = ctk.CTkScrollableFrame(
-            self.tabs.tab("Accounts"),
+            accounts_tab,
             fg_color="transparent",
             scrollbar_button_color=THEME["border"],
             scrollbar_button_hover_color=THEME["accent"],
@@ -2003,14 +2035,43 @@ class App(ctk.CTk):
         
         self.scroll._parent_canvas.yview_moveto(0)
         
+        sort_option = self.sort_var.get() if hasattr(self, "sort_var") else "Name (A-Z)"
+
         for acc in self.data:
             grp = acc.get('group', 'Ungrouped')
             if grp == 'Ungrouped': grp = "Verified" if "cookie" in acc else "Non-Verified"
             acc['_display_group'] = grp
-        self.data.sort(key=lambda x: (x['_display_group'], 0 if "cookie" in x else 1, x['username'].lower()))
-        
-        current_group = None
+
+        grouped = {}
         for acc in self.data:
+            grouped.setdefault(acc['_display_group'], []).append(acc)
+
+        def sort_by_name(acc):
+            return acc['username'].lower()
+
+        def sort_by_age(acc, newest=False):
+            ts = Utils.created_timestamp(acc.get("created"))
+            missing = ts is None
+            if ts is None:
+                ts = 0
+            return (missing, -ts if newest else ts)
+
+        group_order = sorted(grouped.keys())
+        ordered_accounts = []
+        for grp in group_order:
+            accounts = grouped[grp]
+            if sort_option == "Name (Z-A)":
+                accounts = sorted(accounts, key=sort_by_name, reverse=True)
+            elif sort_option == "Oldest Account First":
+                accounts = sorted(accounts, key=lambda acc: sort_by_age(acc, newest=False))
+            elif sort_option == "Newest Account First":
+                accounts = sorted(accounts, key=lambda acc: sort_by_age(acc, newest=True))
+            else:
+                accounts = sorted(accounts, key=sort_by_name)
+            ordered_accounts.extend(accounts)
+
+        current_group = None
+        for acc in ordered_accounts:
             grp = acc['_display_group']
             if grp != current_group:
                 current_group = grp
