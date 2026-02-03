@@ -1767,7 +1767,7 @@ class App(ctk.CTk):
         self._loading_anim_id = None
         self._splash_started_at = None
         self._render_started_at = None
-        self._render_min_duration = 1.2
+        self._render_min_duration = 0.8
         self._render_finish_id = None
         self._render_force_id = None
         self._render_force_timeout = 8.0
@@ -2251,7 +2251,7 @@ class App(ctk.CTk):
             self.loading_overlay.place_forget()
             return
         self._stop_loading_phrase_updates()
-        self._loading_phrase_index = 0
+        self._loading_phrase_index = -1
         self._render_started_at = time.time()
         if self._render_finish_id is not None:
             try:
@@ -2266,7 +2266,7 @@ class App(ctk.CTk):
                 pass
             self._render_force_id = None
         self._render_force_id = self.after(int(self._render_force_timeout * 1000), self._force_finish_render)
-        self._update_loading_phrase()
+        self._update_loading_phrase_for_progress(0)
         self.loading_progress.configure(text=f"0/{total}")
         self.loading_bar.set(0)
         if self._splash_bar:
@@ -2310,6 +2310,7 @@ class App(ctk.CTk):
                 self._splash_bar.set(progress)
                 self._splash_bar.update_idletasks()
             self.loading_bar.update_idletasks()
+            self._update_loading_phrase_for_progress(progress)
         if self._render_index >= total:
             if self._defer_finish_render():
                 return
@@ -2359,8 +2360,8 @@ class App(ctk.CTk):
         self._splash_label = label
         self._splash_started_at = time.time()
         self._stop_loading_phrase_updates()
-        self._loading_phrase_index = 0
-        self._update_loading_phrase()
+        self._loading_phrase_index = -1
+        self._update_loading_phrase_for_progress(0)
 
     def _hide_splash(self):
         if not self._splash:
@@ -2381,14 +2382,20 @@ class App(ctk.CTk):
         self._splash_started_at = None
         self.deiconify()
 
-    def _update_loading_phrase(self):
-        phrase = self._loading_phrases[self._loading_phrase_index % len(self._loading_phrases)]
-        self._loading_phrase_index += 1
+    def _update_loading_phrase_for_progress(self, progress):
+        if not self._loading_phrases:
+            return
+        progress = max(0.0, min(1.0, progress))
+        phrase_count = len(self._loading_phrases)
+        target_index = min(phrase_count - 1, int(progress * phrase_count))
+        if target_index == self._loading_phrase_index:
+            return
+        self._loading_phrase_index = target_index
+        phrase = self._loading_phrases[target_index]
         if hasattr(self, "loading_label"):
             self.loading_label.configure(text=phrase)
         if self._splash_label:
             self._splash_label.configure(text=phrase)
-        self._loading_phrase_id = self.after(700, self._update_loading_phrase)
 
     def _stop_loading_phrase_updates(self):
         if self._loading_phrase_id is None:
@@ -2408,6 +2415,7 @@ class App(ctk.CTk):
                 self._splash_bar.set(progress)
                 self._splash_bar.update_idletasks()
             self.loading_bar.update_idletasks()
+            self._update_loading_phrase_for_progress(progress)
         if elapsed >= self._render_min_duration:
             self._finalize_render()
             return False
