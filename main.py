@@ -199,6 +199,21 @@ class Utils:
         return f"{int(diff // 3600)}h ago"
 
     @staticmethod
+    def account_age_label(created_at):
+        if not created_at:
+            return None
+        try:
+            if isinstance(created_at, (int, float)):
+                created_dt = datetime.fromtimestamp(created_at, tz=timezone.utc)
+            else:
+                created_dt = datetime.fromisoformat(str(created_at).replace("Z", "+00:00"))
+            now = datetime.now(timezone.utc)
+            days = max(0, (now - created_dt).days)
+            return f"{days}d"
+        except Exception:
+            return None
+
+    @staticmethod
     def random_string(length=8):
         chars = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
         return "".join(random.choice(chars) for _ in range(length))
@@ -697,8 +712,14 @@ class RobloxClient:
             r = sess.get("https://users.roblox.com/v1/users/authenticated", timeout=10)
             if r.status_code == 401: return {"status": "Expired"}
             u = r.json()
+            created = None
+            try:
+                profile = sess.get(f"https://users.roblox.com/v1/users/{u['id']}", timeout=10).json()
+                created = profile.get("created")
+            except Exception:
+                created = None
             curr = sess.get(f"https://economy.roblox.com/v1/users/{u['id']}/currency", timeout=10).json()
-            return {"userid": str(u["id"]), "display_name": u["displayName"], "robux": str(curr.get("robux", 0)), "status": "OK"}
+            return {"userid": str(u["id"]), "display_name": u["displayName"], "robux": str(curr.get("robux", 0)), "created": created, "status": "OK"}
         except: return {"status": "Invalid"}
 
     def get_id(self, user):
@@ -2051,6 +2072,10 @@ class App(ctk.CTk):
             game_btn.pack(side="left")
 
             ctk.CTkLabel(name_row, text=f" • {status_text}", font=FontService.ui(11), text_color=stat_col).pack(side="left")
+
+            age_label = Utils.account_age_label(acc.get("created"))
+            if age_label:
+                ctk.CTkLabel(name_row, text=f" • {age_label}", font=FontService.ui(11), text_color=THEME["text_sub"]).pack(side="left")
         else:
             ctk.CTkLabel(name_row, text=" • Not Verified", font=FontService.ui(11), text_color=THEME["text_sub"]).pack(side="left")
 
