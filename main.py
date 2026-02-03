@@ -722,6 +722,18 @@ class RobloxClient:
             return {"userid": str(u["id"]), "display_name": u["displayName"], "robux": str(curr.get("robux", 0)), "created": created, "status": "OK"}
         except: return {"status": "Invalid"}
 
+    def get_user_created(self, user_id, proxy=None):
+        if not user_id:
+            return None
+        try:
+            sess = self._create_session(proxy)
+            r = sess.get(f"https://users.roblox.com/v1/users/{user_id}", timeout=10)
+            if r.status_code == 200:
+                return r.json().get("created")
+        except Exception:
+            return None
+        return None
+
     def get_id(self, user):
         try: return HttpClient.post("https://users.roblox.com/v1/usernames/users", json={"usernames": [user], "excludeBannedUsers": True}).json()["data"][0]["id"]
         except: return None
@@ -2072,6 +2084,17 @@ class App(ctk.CTk):
             game_btn.pack(side="left")
 
             ctk.CTkLabel(name_row, text=f" • {status_text}", font=FontService.ui(11), text_color=stat_col).pack(side="left")
+
+            if acc.get("userid") and not acc.get("created") and not acc.get("_created_fetching"):
+                acc["_created_fetching"] = True
+                def fetch_created():
+                    created = self.api.get_user_created(acc.get("userid"), acc.get("proxy"))
+                    if created:
+                        acc["created"] = created
+                        AccountStore.save(self.data)
+                    acc.pop("_created_fetching", None)
+                    self.after(0, self.refresh_ui)
+                threading.Thread(target=fetch_created, daemon=True).start()
 
             age_label = Utils.account_age_label(acc.get("created"))
             if age_label:
