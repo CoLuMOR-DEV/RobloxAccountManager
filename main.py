@@ -1759,6 +1759,9 @@ class App(ctk.CTk):
         self.title(f"{APP_NAME}")
         self.geometry("1220x840")
         self.configure(fg_color=THEME["bg"])
+        self._splash = None
+        self._splash_bar = None
+        self._show_splash()
         icon_path = os.path.join(os.getcwd(), "icon.ico")
         if os.path.exists(icon_path):
             try:
@@ -2219,6 +2222,7 @@ class App(ctk.CTk):
     def _hide_loading_overlay(self):
         self.loading_bar.stop()
         self.loading_overlay.place_forget()
+        self._hide_splash()
 
     def _render_next_batch(self, token, batch_size=20):
         if token != getattr(self, "_render_token", None):
@@ -2247,6 +2251,57 @@ class App(ctk.CTk):
                 if self.job_acc_var.get() not in acc_names: self.job_acc_var.set(acc_names[0])
             return
         self.after(1, lambda: self._render_next_batch(token, batch_size=batch_size))
+
+    def _show_splash(self):
+        if self._splash:
+            return
+        self.withdraw()
+        splash = ctk.CTkToplevel(self)
+        splash.overrideredirect(True)
+        splash.configure(fg_color=THEME["bg"])
+        width, height = 420, 180
+        Utils.center_window(splash, width, height)
+        container = ctk.CTkFrame(splash, fg_color=THEME["card_bg"], corner_radius=18)
+        container.pack(fill="both", expand=True, padx=12, pady=12)
+        ctk.CTkLabel(
+            container,
+            text="LOADING",
+            text_color=THEME["text_main"],
+            font=FontService.ui(20, "bold"),
+        ).pack(pady=(26, 8))
+        bar = ctk.CTkProgressBar(
+            container,
+            width=260,
+            height=8,
+            corner_radius=8,
+            fg_color=THEME["border"],
+            progress_color=THEME["accent"],
+        )
+        bar.pack(pady=(0, 8))
+        bar.start()
+        ctk.CTkLabel(
+            container,
+            text="Loading account cards...",
+            text_color=THEME["text_sub"],
+            font=FontService.ui(12),
+        ).pack(pady=(0, 20))
+        splash.lift()
+        splash.update_idletasks()
+        self._splash = splash
+        self._splash_bar = bar
+
+    def _hide_splash(self):
+        if not self._splash:
+            return
+        if self._splash_bar:
+            self._splash_bar.stop()
+        try:
+            self._splash.destroy()
+        except Exception:
+            pass
+        self._splash = None
+        self._splash_bar = None
+        self.deiconify()
 
     def show_menu(self, acc):
         global parent
