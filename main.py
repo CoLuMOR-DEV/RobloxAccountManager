@@ -1765,6 +1765,7 @@ class App(ctk.CTk):
         self._refresh_after_id = None
         self._loading_phrase_id = None
         self._loading_anim_id = None
+        self._splash_started_at = None
         self._loading_phrases = [
             "Loading account cards...",
             "Fetching avatars...",
@@ -2249,6 +2250,8 @@ class App(ctk.CTk):
         self._update_loading_phrase()
         self.loading_progress.configure(text=f"0/{total}")
         self.loading_bar.set(0)
+        if self._splash_bar:
+            self._splash_bar.set(0)
         self.loading_overlay.place(relx=0.5, rely=0.4, anchor="center")
         self.loading_overlay.lift()
         self.loading_overlay.update_idletasks()
@@ -2277,7 +2280,10 @@ class App(ctk.CTk):
         self._render_index = end
         self.loading_progress.configure(text=f"{self._render_index}/{total}")
         if total > 0:
-            self.loading_bar.set(self._render_index / total)
+            progress = self._render_index / total
+            self.loading_bar.set(progress)
+            if self._splash_bar:
+                self._splash_bar.set(progress)
         if self._render_index >= total:
             self._hide_loading_overlay()
             acc_names = [a['username'] for a in self.data if "cookie" in a]
@@ -2330,15 +2336,19 @@ class App(ctk.CTk):
         self._splash = splash
         self._splash_bar = bar
         self._splash_label = label
+        self._splash_started_at = time.time()
         self._stop_loading_phrase_updates()
         self._loading_phrase_index = 0
         self._update_loading_phrase()
-        self._start_loading_animation()
 
     def _hide_splash(self):
         if not self._splash:
             return
-        self._stop_loading_animation()
+        if self._splash_started_at is not None:
+            elapsed = time.time() - self._splash_started_at
+            if elapsed < 0.6:
+                self.after(int((0.6 - elapsed) * 1000), self._hide_splash)
+                return
         self._stop_loading_phrase_updates()
         try:
             self._splash.destroy()
@@ -2347,6 +2357,7 @@ class App(ctk.CTk):
         self._splash = None
         self._splash_bar = None
         self._splash_label = None
+        self._splash_started_at = None
         self.deiconify()
 
     def _update_loading_phrase(self):
@@ -2368,35 +2379,10 @@ class App(ctk.CTk):
         self._loading_phrase_id = None
 
     def _start_loading_animation(self):
-        if self._loading_anim_id is not None:
-            return
-
-        def _tick(direction=1):
-            if not self._splash_bar:
-                self._loading_anim_id = None
-                return
-            value = self._splash_bar.get()
-            value += 0.02 * direction
-            if value >= 1:
-                value = 1
-                direction = -1
-            elif value <= 0:
-                value = 0
-                direction = 1
-            self._splash_bar.set(value)
-            self._loading_anim_id = self.after(30, lambda: _tick(direction))
-
-        self._splash_bar.set(0)
-        self._loading_anim_id = self.after(150, _tick)
+        return
 
     def _stop_loading_animation(self):
-        if self._loading_anim_id is None:
-            return
-        try:
-            self.after_cancel(self._loading_anim_id)
-        except Exception:
-            pass
-        self._loading_anim_id = None
+        return
 
     def show_menu(self, acc):
         global parent
