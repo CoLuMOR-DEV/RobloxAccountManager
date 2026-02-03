@@ -1903,6 +1903,16 @@ class App(ctk.CTk):
             font=FontService.ui(14, "bold"),
         )
         self.loading_label.pack(padx=24, pady=(20, 6))
+        self.loading_bar = ctk.CTkProgressBar(
+            self.loading_overlay,
+            width=260,
+            height=8,
+            corner_radius=8,
+            fg_color=THEME["border"],
+            progress_color=THEME["accent"],
+        )
+        self.loading_bar.set(0)
+        self.loading_bar.pack(padx=24, pady=(0, 10), fill="x")
         self.loading_progress = ctk.CTkLabel(
             self.loading_overlay,
             text="",
@@ -2201,11 +2211,13 @@ class App(ctk.CTk):
             return
         self.loading_label.configure(text="Loading account cards...")
         self.loading_progress.configure(text=f"0/{total}")
+        self.loading_bar.start()
         self.loading_overlay.place(relx=0.5, rely=0.4, anchor="center")
         self.loading_overlay.lift()
         self.loading_overlay.update_idletasks()
 
     def _hide_loading_overlay(self):
+        self.loading_bar.stop()
         self.loading_overlay.place_forget()
 
     def _render_next_batch(self, token, batch_size=20):
