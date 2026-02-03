@@ -2392,6 +2392,13 @@ class App(ctk.CTk):
 
     def _defer_finish_render(self):
         elapsed = (time.time() - self._render_started_at) if self._render_started_at else 0
+        if self._render_min_duration > 0:
+            progress = min(1.0, elapsed / self._render_min_duration)
+            self.loading_bar.set(progress)
+            if self._splash_bar:
+                self._splash_bar.set(progress)
+                self._splash_bar.update_idletasks()
+            self.loading_bar.update_idletasks()
         if elapsed >= self._render_min_duration:
             self._finalize_render()
             return False
@@ -2401,6 +2408,11 @@ class App(ctk.CTk):
 
     def _finalize_render(self):
         self._render_finish_id = None
+        self.loading_bar.set(1.0)
+        if self._splash_bar:
+            self._splash_bar.set(1.0)
+            self._splash_bar.update_idletasks()
+        self.loading_bar.update_idletasks()
         self._hide_loading_overlay()
         acc_names = [a['username'] for a in self.data if "cookie" in a]
         if not acc_names: acc_names = ["No Verified Accounts"]
