@@ -1762,7 +1762,14 @@ class App(ctk.CTk):
         self._splash = None
         self._splash_bar = None
         self._refresh_after_id = None
+        self._ui_ready = False
         self._show_splash()
+        self.after(10, self._init_ui)
+
+    def _init_ui(self):
+        if self._ui_ready:
+            return
+        self._ui_ready = True
         icon_path = os.path.join(os.getcwd(), "icon.ico")
         if os.path.exists(icon_path):
             try:
@@ -2300,6 +2307,7 @@ class App(ctk.CTk):
         ).pack(pady=(0, 20))
         splash.lift()
         splash.update_idletasks()
+        splash.update()
         self._splash = splash
         self._splash_bar = bar
 
