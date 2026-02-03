@@ -1766,10 +1766,13 @@ class App(ctk.CTk):
         self._loading_phrase_id = None
         self._loading_anim_id = None
         self._splash_started_at = None
+        self._render_started_at = None
+        self._render_min_duration = 1.2
+        self._render_finish_id = None
         self._loading_phrases = [
-            "Loading account cards...",
-            "Fetching avatars...",
-            "Syncing account data...",
+            "Warming up session...",
+            "Loading profiles...",
+            "Caching avatars...",
             "Preparing dashboard...",
             "Finalizing layout...",
         ]
@@ -1921,7 +1924,7 @@ class App(ctk.CTk):
         self.loading_overlay = ctk.CTkFrame(accounts_tab, fg_color=THEME["card_bg"], corner_radius=18)
         self.loading_label = ctk.CTkLabel(
             self.loading_overlay,
-            text="Loading account cards...",
+            text="Warming up session...",
             text_color=THEME["text_main"],
             font=FontService.ui(14, "bold"),
         )
@@ -2247,6 +2250,13 @@ class App(ctk.CTk):
             return
         self._stop_loading_phrase_updates()
         self._loading_phrase_index = 0
+        self._render_started_at = time.time()
+        if self._render_finish_id is not None:
+            try:
+                self.after_cancel(self._render_finish_id)
+            except Exception:
+                pass
+            self._render_finish_id = None
         self._update_loading_phrase()
         self.loading_progress.configure(text=f"0/{total}")
         self.loading_bar.set(0)
@@ -2283,19 +2293,17 @@ class App(ctk.CTk):
         self.loading_progress.configure(text=f"{self._render_index}/{total}")
         if total > 0:
             progress = self._render_index / total
+            elapsed = (time.time() - self._render_started_at) if self._render_started_at else 0
+            if elapsed < self._render_min_duration:
+                progress = min(progress, elapsed / self._render_min_duration)
             self.loading_bar.set(progress)
             if self._splash_bar:
                 self._splash_bar.set(progress)
                 self._splash_bar.update_idletasks()
             self.loading_bar.update_idletasks()
         if self._render_index >= total:
-            self._hide_loading_overlay()
-            acc_names = [a['username'] for a in self.data if "cookie" in a]
-            if not acc_names: acc_names = ["No Verified Accounts"]
-            if hasattr(self, 'job_acc_menu'):
-                self.job_acc_menu.configure(values=acc_names)
-                if self.job_acc_var.get() not in acc_names: self.job_acc_var.set(acc_names[0])
-            return
+            if self._defer_finish_render():
+                return
         self.after(5, lambda: self._render_next_batch(token, batch_size=batch_size))
 
     def _show_splash(self):
@@ -2329,7 +2337,7 @@ class App(ctk.CTk):
         bar.update_idletasks()
         label = ctk.CTkLabel(
             container,
-            text="Loading account cards...",
+            text="Warming up session...",
             text_color=THEME["text_sub"],
             font=FontService.ui(12),
         )
@@ -2350,8 +2358,8 @@ class App(ctk.CTk):
             return
         if self._splash_started_at is not None:
             elapsed = time.time() - self._splash_started_at
-            if elapsed < 0.6:
-                self.after(int((0.6 - elapsed) * 1000), self._hide_splash)
+            if elapsed < 1.2:
+                self.after(int((1.2 - elapsed) * 1000), self._hide_splash)
                 return
         self._stop_loading_phrase_updates()
         try:
@@ -2371,7 +2379,7 @@ class App(ctk.CTk):
             self.loading_label.configure(text=phrase)
         if self._splash_label:
             self._splash_label.configure(text=phrase)
-        self._loading_phrase_id = self.after(1200, self._update_loading_phrase)
+        self._loading_phrase_id = self.after(700, self._update_loading_phrase)
 
     def _stop_loading_phrase_updates(self):
         if self._loading_phrase_id is None:
@@ -2381,6 +2389,24 @@ class App(ctk.CTk):
         except Exception:
             pass
         self._loading_phrase_id = None
+
+    def _defer_finish_render(self):
+        elapsed = (time.time() - self._render_started_at) if self._render_started_at else 0
+        if elapsed >= self._render_min_duration:
+            self._finalize_render()
+            return False
+        if self._render_finish_id is None:
+            self._render_finish_id = self.after(50, self._defer_finish_render)
+        return True
+
+    def _finalize_render(self):
+        self._render_finish_id = None
+        self._hide_loading_overlay()
+        acc_names = [a['username'] for a in self.data if "cookie" in a]
+        if not acc_names: acc_names = ["No Verified Accounts"]
+        if hasattr(self, 'job_acc_menu'):
+            self.job_acc_menu.configure(values=acc_names)
+            if self.job_acc_var.get() not in acc_names: self.job_acc_var.set(acc_names[0])
 
     def _start_loading_animation(self):
         return
