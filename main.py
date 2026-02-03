@@ -1761,7 +1761,18 @@ class App(ctk.CTk):
         self.configure(fg_color=THEME["bg"])
         self._splash = None
         self._splash_bar = None
+        self._splash_label = None
         self._refresh_after_id = None
+        self._loading_phrase_id = None
+        self._loading_anim_id = None
+        self._loading_phrases = [
+            "Loading account cards...",
+            "Fetching avatars...",
+            "Syncing account data...",
+            "Preparing dashboard...",
+            "Finalizing layout...",
+        ]
+        self._loading_phrase_index = 0
         self._ui_ready = False
         self._show_splash()
         self.after(10, self._init_ui)
@@ -2232,15 +2243,17 @@ class App(ctk.CTk):
         if total <= 0:
             self.loading_overlay.place_forget()
             return
-        self.loading_label.configure(text="Loading account cards...")
+        self._stop_loading_phrase_updates()
+        self._loading_phrase_index = 0
+        self._update_loading_phrase()
         self.loading_progress.configure(text=f"0/{total}")
-        self.loading_bar.start()
+        self.loading_bar.set(0)
         self.loading_overlay.place(relx=0.5, rely=0.4, anchor="center")
         self.loading_overlay.lift()
         self.loading_overlay.update_idletasks()
 
     def _hide_loading_overlay(self):
-        self.loading_bar.stop()
+        self._stop_loading_phrase_updates()
         self.loading_overlay.place_forget()
         self._hide_splash()
 
@@ -2262,6 +2275,8 @@ class App(ctk.CTk):
             self.card(acc)
         self._render_index = end
         self.loading_progress.configure(text=f"{self._render_index}/{total}")
+        if total > 0:
+            self.loading_bar.set(self._render_index / total)
         if self._render_index >= total:
             self._hide_loading_overlay()
             acc_names = [a['username'] for a in self.data if "cookie" in a]
@@ -2298,31 +2313,86 @@ class App(ctk.CTk):
             progress_color=THEME["accent"],
         )
         bar.pack(pady=(0, 8))
-        bar.start()
-        ctk.CTkLabel(
+        bar.set(0)
+        label = ctk.CTkLabel(
             container,
             text="Loading account cards...",
             text_color=THEME["text_sub"],
             font=FontService.ui(12),
-        ).pack(pady=(0, 20))
+        )
+        label.pack(pady=(0, 20))
         splash.lift()
         splash.update_idletasks()
         splash.update()
         self._splash = splash
         self._splash_bar = bar
+        self._splash_label = label
+        self._stop_loading_phrase_updates()
+        self._loading_phrase_index = 0
+        self._update_loading_phrase()
+        self._start_loading_animation()
 
     def _hide_splash(self):
         if not self._splash:
             return
-        if self._splash_bar:
-            self._splash_bar.stop()
+        self._stop_loading_animation()
+        self._stop_loading_phrase_updates()
         try:
             self._splash.destroy()
         except Exception:
             pass
         self._splash = None
         self._splash_bar = None
+        self._splash_label = None
         self.deiconify()
+
+    def _update_loading_phrase(self):
+        phrase = self._loading_phrases[self._loading_phrase_index % len(self._loading_phrases)]
+        self._loading_phrase_index += 1
+        if hasattr(self, "loading_label"):
+            self.loading_label.configure(text=phrase)
+        if self._splash_label:
+            self._splash_label.configure(text=phrase)
+        self._loading_phrase_id = self.after(1200, self._update_loading_phrase)
+
+    def _stop_loading_phrase_updates(self):
+        if self._loading_phrase_id is None:
+            return
+        try:
+            self.after_cancel(self._loading_phrase_id)
+        except Exception:
+            pass
+        self._loading_phrase_id = None
+
+    def _start_loading_animation(self):
+        if self._loading_anim_id is not None:
+            return
+
+        def _tick(direction=1):
+            if not self._splash_bar:
+                self._loading_anim_id = None
+                return
+            value = self._splash_bar.get()
+            value += 0.02 * direction
+            if value >= 1:
+                value = 1
+                direction = -1
+            elif value <= 0:
+                value = 0
+                direction = 1
+            self._splash_bar.set(value)
+            self._loading_anim_id = self.after(30, lambda: _tick(direction))
+
+        _tick()
+
+    def _stop_loading_animation(self):
+        if self._loading_anim_id is None:
+            return
+        try:
+            self.after_cancel(self._loading_anim_id)
+        except Exception:
+            pass
+        self._loading_anim_id = None
 
     def show_menu(self, acc):
         global parent
