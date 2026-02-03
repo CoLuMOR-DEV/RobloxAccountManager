@@ -1894,6 +1894,23 @@ class App(ctk.CTk):
         self.scroll._parent_canvas.bind_all(
             "<MouseWheel>", lambda e: self.scroll._parent_canvas.yview_scroll(int(-1 * (e.delta / 120) * 5), "units")
         )
+
+        self.loading_overlay = ctk.CTkFrame(accounts_tab, fg_color=THEME["card_bg"], corner_radius=18)
+        self.loading_label = ctk.CTkLabel(
+            self.loading_overlay,
+            text="Loading account cards...",
+            text_color=THEME["text_main"],
+            font=FontService.ui(14, "bold"),
+        )
+        self.loading_label.pack(padx=24, pady=(20, 6))
+        self.loading_progress = ctk.CTkLabel(
+            self.loading_overlay,
+            text="",
+            text_color=THEME["text_sub"],
+            font=FontService.ui(12),
+        )
+        self.loading_progress.pack(padx=24, pady=(0, 20))
+        self.loading_overlay.place_forget()
         
         self.setup_tools()
         Utils.center_window(self, 1220, 840)
@@ -2070,21 +2087,13 @@ class App(ctk.CTk):
                 accounts = sorted(accounts, key=sort_by_name)
             ordered_accounts.extend(accounts)
 
-        current_group = None
-        for acc in ordered_accounts:
-            grp = acc['_display_group']
-            if grp != current_group:
-                current_group = grp
-                gf = ctk.CTkFrame(self.scroll, height=30, fg_color="transparent")
-                gf.pack(fill="x", pady=(15, 5))
-                ctk.CTkLabel(gf, text=f"📂 {grp}", font=FontService.ui(14, "bold"), text_color=THEME["text_sub"]).pack(side="left", padx=6)
-            self.card(acc)
-            
-        acc_names = [a['username'] for a in self.data if "cookie" in a]
-        if not acc_names: acc_names = ["No Verified Accounts"]
-        if hasattr(self, 'job_acc_menu'):
-            self.job_acc_menu.configure(values=acc_names)
-            if self.job_acc_var.get() not in acc_names: self.job_acc_var.set(acc_names[0])
+        self._render_token = getattr(self, "_render_token", 0) + 1
+        token = self._render_token
+        self._render_queue = ordered_accounts
+        self._render_index = 0
+        self._render_group = None
+        self._show_loading_overlay(len(ordered_accounts))
+        self._render_next_batch(token)
 
     def card(self, acc):
         is_verified = "cookie" in acc
@@ -2185,6 +2194,45 @@ class App(ctk.CTk):
         
         ActionBtn(actions, text="⚙", width=30, height=24, type="subtle", command=lambda: self.show_menu(acc)).pack(side="left", padx=3)
         ActionBtn(actions, text="🗑", width=30, height=24, type="danger", command=lambda: self.delete(acc)).pack(side="left", padx=3)
+
+    def _show_loading_overlay(self, total):
+        if total <= 0:
+            self.loading_overlay.place_forget()
+            return
+        self.loading_label.configure(text="Loading account cards...")
+        self.loading_progress.configure(text=f"0/{total}")
+        self.loading_overlay.place(relx=0.5, rely=0.4, anchor="center")
+
+    def _hide_loading_overlay(self):
+        self.loading_overlay.place_forget()
+
+    def _render_next_batch(self, token, batch_size=20):
+        if token != getattr(self, "_render_token", None):
+            return
+        total = len(self._render_queue)
+        if total == 0:
+            self._hide_loading_overlay()
+            return
+        end = min(self._render_index + batch_size, total)
+        for acc in self._render_queue[self._render_index:end]:
+            grp = acc['_display_group']
+            if grp != self._render_group:
+                self._render_group = grp
+                gf = ctk.CTkFrame(self.scroll, height=30, fg_color="transparent")
+                gf.pack(fill="x", pady=(15, 5))
+                ctk.CTkLabel(gf, text=f"📂 {grp}", font=FontService.ui(14, "bold"), text_color=THEME["text_sub"]).pack(side="left", padx=6)
+            self.card(acc)
+        self._render_index = end
+        self.loading_progress.configure(text=f"{self._render_index}/{total}")
+        if self._render_index >= total:
+            self._hide_loading_overlay()
+            acc_names = [a['username'] for a in self.data if "cookie" in a]
+            if not acc_names: acc_names = ["No Verified Accounts"]
+            if hasattr(self, 'job_acc_menu'):
+                self.job_acc_menu.configure(values=acc_names)
+                if self.job_acc_var.get() not in acc_names: self.job_acc_var.set(acc_names[0])
+            return
+        self.after(1, lambda: self._render_next_batch(token, batch_size=batch_size))
 
     def show_menu(self, acc):
         global parent
