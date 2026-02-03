@@ -1761,6 +1761,7 @@ class App(ctk.CTk):
         self.configure(fg_color=THEME["bg"])
         self._splash = None
         self._splash_bar = None
+        self._refresh_after_id = None
         self._show_splash()
         icon_path = os.path.join(os.getcwd(), "icon.ico")
         if os.path.exists(icon_path):
@@ -1877,7 +1878,7 @@ class App(ctk.CTk):
             controls,
             values=sort_options,
             variable=self.sort_var,
-            command=lambda _: self.refresh_ui(),
+            command=lambda _: self.request_refresh_ui(),
             fg_color=THEME["card_bg"],
             button_color=THEME["card_bg"],
             button_hover_color=THEME["card_hover"],
@@ -2108,6 +2109,18 @@ class App(ctk.CTk):
         self._show_loading_overlay(len(ordered_accounts))
         self.after(10, lambda: self._render_next_batch(token))
 
+    def request_refresh_ui(self, delay=120):
+        if self._refresh_after_id is not None:
+            try:
+                self.after_cancel(self._refresh_after_id)
+            except Exception:
+                pass
+        self._refresh_after_id = self.after(delay, self._run_refresh_ui)
+
+    def _run_refresh_ui(self):
+        self._refresh_after_id = None
+        self.refresh_ui()
+
     def card(self, acc):
         is_verified = "cookie" in acc
         status_text = "Not Verified"
@@ -2176,7 +2189,7 @@ class App(ctk.CTk):
                         acc["created"] = created
                         AccountStore.save(self.data)
                     acc.pop("_created_fetching", None)
-                    self.after(0, self.refresh_ui)
+                    self.after(0, self.request_refresh_ui)
                 threading.Thread(target=fetch_created, daemon=True).start()
 
             age_label = Utils.account_age_label(acc.get("created"))
@@ -2306,7 +2319,7 @@ class App(ctk.CTk):
     def show_menu(self, acc):
         global parent
         parent = self
-        AccountManagerWindow(self, acc, lambda: self.refresh_ui(), self.api, self)
+        AccountManagerWindow(self, acc, lambda: self.request_refresh_ui(), self.api, self)
         
     def open_game_selector_for(self, acc):
         def cb(pid, target_acc, game_name):
@@ -2315,7 +2328,7 @@ class App(ctk.CTk):
                 acc['last_played_name'] = game_name
                 AccountStore.save(self.data)
                 self.safe_log(f"Changed Game for [{acc['username']}] to [{game_name}]")
-                self.refresh_ui()
+                self.request_refresh_ui()
         GameSelectorWindow(self, cb, [], self, is_sub_window=True, tool_mode="select_only")
 
     def open_server_browser_for(self, acc):
@@ -2370,7 +2383,7 @@ class App(ctk.CTk):
              acc['game_id'] = pid
              
         AccountStore.save(self.data)
-        self.refresh_ui()
+        self.request_refresh_ui()
         WebhookService.send_launch_log(self.api, acc['username'], game_name, pid, job, acc.get('userid'), manual_track=False, robux=acc.get('robux','0'), server_info=server_info)
         threading.Thread(target=self._launch_t, args=(acc, pid, job), daemon=True).start()
         
@@ -2399,11 +2412,11 @@ class App(ctk.CTk):
         if not found: 
             self.data.append({"username":name, "password":CryptoUtil.encrypt(p), "cookie":c, "user_agent":ua, **stats})
         AccountStore.save(self.data)
-        self.after(0, self.refresh_ui)
+        self.after(0, self.request_refresh_ui)
         self.safe_log(f"[SUCCESS] Saved {name}")
         
     def delete(self, acc): 
-        if messagebox.askyesno("Confirm", "Delete?"): self.data.remove(acc); AccountStore.save(self.data); self.refresh_ui()
+        if messagebox.askyesno("Confirm", "Delete?"): self.data.remove(acc); AccountStore.save(self.data); self.request_refresh_ui()
             
     def refresh(self): 
         self.safe_log("[INFO] Refreshing all accounts (Parallel)...")
@@ -2419,7 +2432,7 @@ class App(ctk.CTk):
                 acc['health'] = Utils.compute_account_health(acc)
         def run_parallel():
             with ThreadPoolExecutor(max_workers=10) as executor: executor.map(update_task, self.data)
-            self.after(0, self.refresh_ui)
+            self.after(0, self.request_refresh_ui)
             self.safe_log("[SUCCESS] Refresh complete.")
         threading.Thread(target=run_parallel, daemon=True).start()
         
@@ -2433,7 +2446,7 @@ class App(ctk.CTk):
                         u, p = l.split(":", 1)
                         self.data.append({"username": u.strip(), "password": CryptoUtil.encrypt(p.strip())})
                 AccountStore.save(self.data)
-                self.refresh_ui()
+                self.request_refresh_ui()
             else:
                 cookies = []
                 for l in text.splitlines():
@@ -2457,9 +2470,9 @@ class App(ctk.CTk):
             self.data.append({"username": username, "cookie": cookie, "user_agent": DEFAULT_UA, **stats})
             self.safe_log(f"[SUCCESS] Imported {username}")
         AccountStore.save(self.data)
-        self.after(0, self.refresh_ui)
+        self.after(0, self.request_refresh_ui)
             
-    def open_settings(self): SettingsWindow(self, lambda:[ConfigService.load(), self.retheme(), self.refresh_ui()])
+    def open_settings(self): SettingsWindow(self, lambda:[ConfigService.load(), self.retheme(), self.request_refresh_ui()])
 
     def retheme(self):
         ThemeService.apply()
@@ -2613,7 +2626,7 @@ class App(ctk.CTk):
                         acc['last_played_name'] = game_name
                     AccountStore.save(self.data)
                     self.safe_log(f"[INFO] Successfully changed all Game to [{game_name}] Place ID: [{pid}]")
-                    self.refresh_ui()
+                    self.request_refresh_ui()
                     
                 elif target_acc and target_acc != "Global Tool Only":
                     acc = next((a for a in self.data if a['username'] == target_acc), None)
