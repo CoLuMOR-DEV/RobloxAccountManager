@@ -2093,7 +2093,7 @@ class App(ctk.CTk):
         self._render_index = 0
         self._render_group = None
         self._show_loading_overlay(len(ordered_accounts))
-        self._render_next_batch(token)
+        self.after(10, lambda: self._render_next_batch(token))
 
     def card(self, acc):
         is_verified = "cookie" in acc
@@ -2202,6 +2202,8 @@ class App(ctk.CTk):
         self.loading_label.configure(text="Loading account cards...")
         self.loading_progress.configure(text=f"0/{total}")
         self.loading_overlay.place(relx=0.5, rely=0.4, anchor="center")
+        self.loading_overlay.lift()
+        self.loading_overlay.update_idletasks()
 
     def _hide_loading_overlay(self):
         self.loading_overlay.place_forget()
