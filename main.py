@@ -2255,13 +2255,15 @@ class App(ctk.CTk):
         self.loading_overlay.place(relx=0.5, rely=0.4, anchor="center")
         self.loading_overlay.lift()
         self.loading_overlay.update_idletasks()
+        if self._splash:
+            self._splash.update_idletasks()
 
     def _hide_loading_overlay(self):
         self._stop_loading_phrase_updates()
         self.loading_overlay.place_forget()
         self._hide_splash()
 
-    def _render_next_batch(self, token, batch_size=20):
+    def _render_next_batch(self, token, batch_size=12):
         if token != getattr(self, "_render_token", None):
             return
         total = len(self._render_queue)
@@ -2284,6 +2286,8 @@ class App(ctk.CTk):
             self.loading_bar.set(progress)
             if self._splash_bar:
                 self._splash_bar.set(progress)
+                self._splash_bar.update_idletasks()
+            self.loading_bar.update_idletasks()
         if self._render_index >= total:
             self._hide_loading_overlay()
             acc_names = [a['username'] for a in self.data if "cookie" in a]
@@ -2292,7 +2296,7 @@ class App(ctk.CTk):
                 self.job_acc_menu.configure(values=acc_names)
                 if self.job_acc_var.get() not in acc_names: self.job_acc_var.set(acc_names[0])
             return
-        self.after(1, lambda: self._render_next_batch(token, batch_size=batch_size))
+        self.after(5, lambda: self._render_next_batch(token, batch_size=batch_size))
 
     def _show_splash(self):
         if self._splash:
