@@ -1932,6 +1932,7 @@ class App(ctk.CTk):
             corner_radius=8,
             fg_color=THEME["border"],
             progress_color=THEME["accent"],
+            mode="determinate",
         )
         self.loading_bar.set(0)
         self.loading_bar.pack(padx=24, pady=(0, 10), fill="x")
@@ -2311,9 +2312,11 @@ class App(ctk.CTk):
             corner_radius=8,
             fg_color=THEME["border"],
             progress_color=THEME["accent"],
+            mode="determinate",
         )
         bar.pack(pady=(0, 8))
         bar.set(0)
+        bar.update_idletasks()
         label = ctk.CTkLabel(
             container,
             text="Loading account cards...",
@@ -2383,7 +2386,8 @@ class App(ctk.CTk):
             self._splash_bar.set(value)
             self._loading_anim_id = self.after(30, lambda: _tick(direction))
 
-        _tick()
+        self._splash_bar.set(0)
+        self._loading_anim_id = self.after(150, _tick)
 
     def _stop_loading_animation(self):
         if self._loading_anim_id is None:
