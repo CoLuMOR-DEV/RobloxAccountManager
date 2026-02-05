@@ -773,7 +773,7 @@ class RobloxClient:
 
 class WebAutomation:
     def __init__(self, log_func): self.log = log_func
-    def open(self, u, p, cookie, target_url, cb, mode="NORMAL", proxy=None, signup_year=None, signup_gender=None):
+    def open(self, u, p, cookie, target_url, cb, mode="NORMAL", proxy=None, signup_year=None, signup_gender=None, new_password=None):
         self.log(f"Opening Edge Browser ({mode})...")
         driver = None
         try:
@@ -904,6 +904,60 @@ class WebAutomation:
                     except: break
                     time.sleep(1)
                 driver.quit(); return
+            if mode == "CHANGE_PASSWORD":
+                success = False
+                message = "Password change failed."
+                try:
+                    if not new_password:
+                        message = "New password missing."
+                    else:
+                        self.log("Attempting password change...")
+                        try:
+                            change_btn = WebDriverWait(driver, 10).until(
+                                EC.element_to_be_clickable((By.XPATH, "//button[contains(., 'Change Password') or contains(., 'Change password')]"))
+                            )
+                            driver.execute_script("arguments[0].scrollIntoView({block: 'center'});", change_btn)
+                            change_btn.click()
+                        except Exception:
+                            pass
+                        time.sleep(1)
+                        pw_inputs = driver.find_elements(By.XPATH, "//input[@type='password']")
+                        if len(pw_inputs) >= 3:
+                            pw_inputs[0].clear()
+                            pw_inputs[0].send_keys(p)
+                            pw_inputs[1].clear()
+                            pw_inputs[1].send_keys(new_password)
+                            pw_inputs[2].clear()
+                            pw_inputs[2].send_keys(new_password)
+                            save_clicked = False
+                            for by, selector in [
+                                (By.XPATH, "//button[contains(., 'Save') or contains(., 'Update')]"),
+                                (By.XPATH, "//input[@type='submit' and (contains(@value, 'Save') or contains(@value, 'Update'))]"),
+                            ]:
+                                try:
+                                    save_btn = WebDriverWait(driver, 5).until(EC.element_to_be_clickable((by, selector)))
+                                    driver.execute_script("arguments[0].scrollIntoView({block: 'center'});", save_btn)
+                                    save_btn.click()
+                                    save_clicked = True
+                                    break
+                                except Exception:
+                                    continue
+                            if save_clicked:
+                                success = True
+                                message = "Password updated."
+                        else:
+                            message = "Password fields not found."
+                except Exception as e:
+                    message = f"Password change error: {e}"
+                try:
+                    cb(success, message)
+                except Exception:
+                    pass
+                try:
+                    driver.quit()
+                except Exception:
+                    pass
+                return
             if mode == "SIGNUP":
                 start = time.time()
                 while time.time() - start < 600:
@@ -975,7 +1029,7 @@ class ActionBtn(ctk.CTkButton):
 
 
 class InputDialog(ctk.CTkToplevel):
-    def __init__(self, parent, title, prompt):
+    def __init__(self, parent, title, prompt, mask=False):
         super().__init__(parent)
         self.title(title)
         self.res = None
@@ -987,6 +1041,8 @@ class InputDialog(ctk.CTkToplevel):
         
         ctk.CTkLabel(container, text=prompt, text_color=THEME["text_main"], font=FontService.ui(13, "bold")).pack(pady=(14, 8), padx=18)
         self.entry = ctk.CTkEntry(container, width=260, fg_color=THEME["input_bg"], text_color=THEME["text_main"], border_color=THEME["border"], border_width=1, corner_radius=12)
+        if mask:
+            self.entry.configure(show="*")
         self.entry.pack(pady=5, padx=18)
         ActionBtn(container, text="OK", type="primary", command=self.ok).pack(pady=(12, 14))
         Utils.center_window(self, 340, 180)
@@ -1653,7 +1709,6 @@ class AccountManagerWindow(ctk.CTkToplevel):
         self.cb = callback
         self.api = api
         self.app = app_ref
-        self.pending_password = None
         self.grab_set()
         self.configure(fg_color=THEME["bg"])
 
@@ -1729,11 +1784,40 @@ class AccountManagerWindow(ctk.CTkToplevel):
         self.destroy()
 
     def change_password(self):
-        dialog = InputDialog(self, "Change Password", "New password:")
-        res = dialog.ask()
-        if res:
-            self.pending_password = res
-            messagebox.showinfo("Password Update", "Password will be updated when you save changes.")
+        if not self.acc.get("cookie"):
+            messagebox.showerror("Error", "No cookie set for this account.")
+            return
+        current_password = self.acc.get("password")
+        if not current_password:
+            messagebox.showerror("Error", "No current password saved for this account.")
+            return
+        dialog = InputDialog(self, "Change Password", "New password:", mask=True)
+        new_password = dialog.ask()
+        if not new_password:
+            return
+
+        def _change():
+            def _cb(success, message):
+                if success:
+                    self.acc["password"] = CryptoUtil.encrypt(new_password)
+                    AccountStore.save(self.app.data)
+                    self.cb()
+                    self.after(0, lambda: messagebox.showinfo("Password Update", message))
+                    self.after(0, self.destroy)
+                else:
+                    self.after(0, lambda: messagebox.showerror("Password Update", message))
+            self.app.safe_log(f"[INFO] Changing password for {self.acc['username']}...")
+            self.app.browser.open(
+                self.acc.get("username", ""),
+                CryptoUtil.decrypt(current_password),
+                self.acc.get("cookie"),
+                "https://www.roblox.com/my/account#!/security",
+                _cb,
+                mode="CHANGE_PASSWORD",
+                proxy=self.acc.get("proxy"),
+                new_password=new_password,
+            )
+        threading.Thread(target=_change, daemon=True).start()
 
     def save(self):
         pid = self.place_entry.get().strip()
@@ -1750,9 +1834,6 @@ class AccountManagerWindow(ctk.CTkToplevel):
         c_val = self.cookie_entry.get().strip()
         if c_val and c_val != self.acc.get("cookie", ""):
              self.acc["cookie"] = c_val
-        if self.pending_password:
-            self.acc["password"] = CryptoUtil.encrypt(self.pending_password)
-            self.pending_password = None
         
         if pid != old_pid and pid:
             def _log_change():
