@@ -1054,6 +1054,37 @@ class InputDialog(ctk.CTkToplevel):
         return self.res
 
 
+class CredentialsDialog(ctk.CTkToplevel):
+    def __init__(self, parent, title="Add Account"):
+        super().__init__(parent)
+        self.title(title)
+        self.res = None
+        self.grab_set()
+        self.configure(fg_color=THEME["bg"])
+        CardFrame(self, height=None).pack(fill="both", expand=True, padx=12, pady=12)
+        container = self.winfo_children()[-1]
+        container.pack_propagate(True)
+
+        ctk.CTkLabel(container, text="Username", text_color=THEME["text_main"], font=FontService.ui(12, "bold")).pack(pady=(14, 4), padx=18, anchor="w")
+        self.user_entry = ctk.CTkEntry(container, width=260, fg_color=THEME["input_bg"], text_color=THEME["text_main"], border_color=THEME["border"], border_width=1, corner_radius=12)
+        self.user_entry.pack(pady=(0, 8), padx=18)
+
+        ctk.CTkLabel(container, text="Password", text_color=THEME["text_main"], font=FontService.ui(12, "bold")).pack(pady=(6, 4), padx=18, anchor="w")
+        self.pass_entry = ctk.CTkEntry(container, width=260, fg_color=THEME["input_bg"], text_color=THEME["text_main"], border_color=THEME["border"], border_width=1, corner_radius=12, show="*")
+        self.pass_entry.pack(pady=(0, 12), padx=18)
+
+        ActionBtn(container, text="OK", type="primary", command=self.ok).pack(pady=(0, 14))
+        Utils.center_window(self, 360, 240)
+
+    def ok(self):
+        self.res = (self.user_entry.get().strip(), self.pass_entry.get())
+        self.destroy()
+
+    def ask(self):
+        self.wait_window()
+        return self.res
+
+
 class ImportAccountsDialog(ctk.CTkToplevel):
     def __init__(self, parent):
         super().__init__(parent)
@@ -2655,7 +2686,15 @@ class App(ctk.CTk):
         threading.Thread(target=self.browser.open, args=(acc['username'], CryptoUtil.decrypt(acc.get('password')), acc.get('cookie'), "https://www.roblox.com/home", self.update_acc, "LOGIN_ONLY", acc.get('proxy')), daemon=True).start()
         
     def manual(self): 
-        threading.Thread(target=self.browser.open, args=("", "", None, "https://www.roblox.com/login", self.update_acc, "LOGIN_ONLY"), daemon=True).start()
+        dialog = CredentialsDialog(self, "Add Account")
+        res = dialog.ask()
+        if not res:
+            return
+        username, password = res
+        if not username or not password:
+            messagebox.showerror("Error", "Username and password are required.")
+            return
+        threading.Thread(target=self.browser.open, args=(username, password, None, "https://www.roblox.com/login", self.update_acc, "LOGIN_ONLY"), daemon=True).start()
         
     def update_acc(self, u, p, c, ua):
         stats = self.api.stats(c, ua)
