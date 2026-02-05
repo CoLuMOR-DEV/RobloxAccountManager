@@ -1653,6 +1653,7 @@ class AccountManagerWindow(ctk.CTkToplevel):
         self.cb = callback
         self.api = api
         self.app = app_ref
+        self.pending_password = None
         self.grab_set()
         self.configure(fg_color=THEME["bg"])
 
@@ -1706,6 +1707,8 @@ class AccountManagerWindow(ctk.CTkToplevel):
         self.proxy_entry.insert(0, acc.get("proxy", ""))
         self.proxy_entry.pack(pady=6)
 
+        ActionBtn(t_data, text="Change Password", width=200, type="warning", command=self.change_password).pack(pady=(16, 6))
+
         ActionBtn(self, text="Save Changes", type="success", command=self.save).pack(fill="x", padx=18, pady=(0, 16))
         Utils.center_window(self, 440, 600)
 
@@ -1725,6 +1728,13 @@ class AccountManagerWindow(ctk.CTkToplevel):
         ServerBrowserWindow(self.app, pid, self.acc, self.api, self.app.launch)
         self.destroy()
 
+    def change_password(self):
+        dialog = InputDialog(self, "Change Password", "New password:")
+        res = dialog.ask()
+        if res:
+            self.pending_password = res
+            messagebox.showinfo("Password Update", "Password will be updated when you save changes.")
+
     def save(self):
         pid = self.place_entry.get().strip()
         old_pid = self.acc.get("default_place_id", "")
@@ -1740,6 +1750,9 @@ class AccountManagerWindow(ctk.CTkToplevel):
         c_val = self.cookie_entry.get().strip()
         if c_val and c_val != self.acc.get("cookie", ""):
              self.acc["cookie"] = c_val
+        if self.pending_password:
+            self.acc["password"] = CryptoUtil.encrypt(self.pending_password)
+            self.pending_password = None
         
         if pid != old_pid and pid:
             def _log_change():
@@ -1784,6 +1797,7 @@ class App(ctk.CTk):
         ]
         self._loading_phrase_index = 0
         self._ui_ready = False
+        self._suppress_loading_overlay = False
         self._show_splash()
         self.after(10, self._init_ui)
 
@@ -2137,7 +2151,13 @@ class App(ctk.CTk):
         self._render_queue = ordered_accounts
         self._render_index = 0
         self._render_group = None
-        self._show_loading_overlay(len(ordered_accounts))
+        show_overlay = not getattr(self, "_suppress_loading_overlay", False)
+        self._suppress_loading_overlay = False
+        self._render_started_at = time.time()
+        if show_overlay:
+            self._show_loading_overlay(len(ordered_accounts))
+        else:
+            self._hide_loading_overlay()
         self.after(10, lambda: self._render_next_batch(token))
 
     def request_refresh_ui(self, delay=120):
@@ -2532,6 +2552,7 @@ class App(ctk.CTk):
              acc['game_id'] = pid
              
         AccountStore.save(self.data)
+        self._suppress_loading_overlay = True
         self.request_refresh_ui()
         WebhookService.send_launch_log(self.api, acc['username'], game_name, pid, job, acc.get('userid'), manual_track=False, robux=acc.get('robux','0'), server_info=server_info)
         threading.Thread(target=self._launch_t, args=(acc, pid, job), daemon=True).start()
