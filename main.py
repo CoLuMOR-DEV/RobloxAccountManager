@@ -265,6 +265,10 @@ class Utils:
 
     @staticmethod
     def compute_account_health(acc: dict) -> int:
+        if acc.get("status") and acc.get("status") != "OK":
+            return 0
+        if acc.get("health_status") == "bad":
+            return 0
         score = 0
         try:
             if acc.get("status") == "OK": score += 40
@@ -2039,6 +2043,8 @@ class App(ctk.CTk):
             if "cookie" in acc:
                 res = self.api.stats(acc['cookie'], acc.get('user_agent'), acc.get('proxy'))
                 acc["health_status"] = "good" if res.get("status") == "OK" else "bad"
+                if res.get("status"):
+                    acc["status"] = res.get("status")
         def run_check():
             with ThreadPoolExecutor(max_workers=15) as executor:
                 executor.map(check_task, self.data)
@@ -2536,6 +2542,12 @@ class App(ctk.CTk):
             self.safe_log(f"[SUCCESS] Launched {acc['username']}")
         else: 
             self.safe_log(f"[ERROR] Launch Error: {res}")
+            if res == "Invalid Cookie / No CSRF":
+                acc["status"] = "Invalid"
+                acc["health_status"] = "bad"
+                acc["health"] = 0
+                AccountStore.save(self.data)
+                self.after(0, self.request_refresh_ui)
         
     def login(self, acc): 
         threading.Thread(target=self.browser.open, args=(acc['username'], CryptoUtil.decrypt(acc.get('password')), acc.get('cookie'), "https://www.roblox.com/home", self.update_acc, "LOGIN_ONLY", acc.get('proxy')), daemon=True).start()
