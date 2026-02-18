@@ -608,7 +608,34 @@ class AssetLoader:
 
 
 class RobloxClient:
+    _launch_gate = threading.Lock()
+    _next_ticket_request_at = 0.0
+
     def __init__(self, log_func): self.log = log_func
+
+    @classmethod
+    def _read_retry_after_seconds(cls, response):
+        value = (response.headers or {}).get("Retry-After")
+        if not value:
+            return None
+        try:
+            return max(0.0, float(value))
+        except Exception:
+            return None
+
+    @classmethod
+    def _wait_for_ticket_slot(cls, min_gap=1.25):
+        with cls._launch_gate:
+            now = time.time()
+            wait_seconds = max(0.0, cls._next_ticket_request_at - now)
+            cls._next_ticket_request_at = max(cls._next_ticket_request_at, now) + min_gap
+        if wait_seconds > 0:
+            time.sleep(wait_seconds)
+
+    @classmethod
+    def _push_ticket_slot(cls, delay_seconds):
+        with cls._launch_gate:
+            cls._next_ticket_request_at = max(cls._next_ticket_request_at, time.time() + max(0.0, delay_seconds))
 
     def _safe_json(self, response):
         try:
@@ -620,12 +647,16 @@ class RobloxClient:
         last_status = None
 
         for attempt in range(max_attempts):
+            self._wait_for_ticket_slot()
             csrf_req = session.post("https://auth.roblox.com/v2/logout", timeout=10)
             csrf = csrf_req.headers.get("x-csrf-token")
             if not csrf:
                 last_status = csrf_req.status_code
                 if csrf_req.status_code == 429:
-                    time.sleep(min(1.2 * (attempt + 1), 6))
+                    retry_after = self._read_retry_after_seconds(csrf_req)
+                    delay = retry_after if retry_after is not None else min(1.2 * (attempt + 1), 6)
+                    self._push_ticket_slot(delay)
+                    time.sleep(delay)
                     continue
                 if csrf_req.status_code == 403:
                     return None, "Invalid/expired cookie (403). Re-login this account and try again."
@@ -655,18 +686,24 @@ class RobloxClient:
                         return ticket, None
                     last_status = ticket_retry.status_code
                     if ticket_retry.status_code == 429:
-                        time.sleep(min(1.5 * (attempt + 1), 8))
+                        retry_after = self._read_retry_after_seconds(ticket_retry)
+                        delay = retry_after if retry_after is not None else min(1.5 * (attempt + 1), 8)
+                        self._push_ticket_slot(delay)
+                        time.sleep(delay)
                         continue
                 return None, "Launch blocked by Roblox (403). Refresh cookie and check proxy/IP reputation."
 
             if ticket_resp.status_code == 429:
-                time.sleep(min(1.5 * (attempt + 1), 8))
+                retry_after = self._read_retry_after_seconds(ticket_resp)
+                delay = retry_after if retry_after is not None else min(1.5 * (attempt + 1), 8)
+                self._push_ticket_slot(delay)
+                time.sleep(delay)
                 continue
 
             return None, f"Launch Error: No Ticket (Code {ticket_resp.status_code})"
 
         if last_status == 429:
-            return None, "Roblox rate limited launch ticket requests (429). Wait 30-90 seconds and retry."
+            return None, "Roblox is rate-limiting ticket requests (429). Multi-launch has been throttled; wait a moment and retry."
         return None, f"Launch Error: No Ticket (Code {last_status or 'Unknown'})"
     
     def _create_session(self, proxy=None):
