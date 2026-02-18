@@ -712,6 +712,17 @@ class RobloxClient:
         if proxy: s.proxies.update({"http": proxy, "https": proxy})
         return s
 
+    def _launch_via_web_fallback(self, place, job_id=None):
+        try:
+            if job_id:
+                url = f"https://www.roblox.com/games/start?placeId={place}&gameInstanceId={job_id}"
+            else:
+                url = f"https://www.roblox.com/games/{place}"
+            os.startfile(url)
+            return True
+        except Exception:
+            return False
+
     def launch(self, acc, place, ua, job_id=None, proxy=None):
         cookie = acc.get("cookie")
         if not cookie:
@@ -724,6 +735,9 @@ class RobloxClient:
             s.cookies.set(".ROBLOSECURITY", cookie, domain=".roblox.com", secure=True)
             ticket, ticket_error = self._request_launch_ticket(s, place)
             if ticket_error:
+                if "403" in ticket_error or "429" in ticket_error:
+                    if self._launch_via_web_fallback(place, job_id):
+                        return f"{ticket_error} | Opened Roblox web launch fallback."
                 return ticket_error
             
             ts = int(time.time() * 1000)
