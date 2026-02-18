@@ -199,6 +199,33 @@ class Utils:
         return f"{int(diff // 3600)}h ago"
 
     @staticmethod
+    def account_age_label(created_at):
+        if not created_at:
+            return None
+        try:
+            if isinstance(created_at, (int, float)):
+                created_dt = datetime.fromtimestamp(created_at, tz=timezone.utc)
+            else:
+                created_dt = datetime.fromisoformat(str(created_at).replace("Z", "+00:00"))
+            now = datetime.now(timezone.utc)
+            days = max(0, (now - created_dt).days)
+            return f"{days}d"
+        except Exception:
+            return None
+
+    @staticmethod
+    def created_timestamp(created_at):
+        if not created_at:
+            return None
+        try:
+            if isinstance(created_at, (int, float)):
+                return float(created_at)
+            created_dt = datetime.fromisoformat(str(created_at).replace("Z", "+00:00"))
+            return created_dt.timestamp()
+        except Exception:
+            return None
+
+    @staticmethod
     def random_string(length=8):
         chars = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
         return "".join(random.choice(chars) for _ in range(length))
@@ -238,6 +265,10 @@ class Utils:
 
     @staticmethod
     def compute_account_health(acc: dict) -> int:
+        if acc.get("status") and acc.get("status") != "OK":
+            return 0
+        if acc.get("health_status") == "bad":
+            return 0
         score = 0
         try:
             if acc.get("status") == "OK": score += 40
@@ -697,9 +728,27 @@ class RobloxClient:
             r = sess.get("https://users.roblox.com/v1/users/authenticated", timeout=10)
             if r.status_code == 401: return {"status": "Expired"}
             u = r.json()
+            created = None
+            try:
+                profile = sess.get(f"https://users.roblox.com/v1/users/{u['id']}", timeout=10).json()
+                created = profile.get("created")
+            except Exception:
+                created = None
             curr = sess.get(f"https://economy.roblox.com/v1/users/{u['id']}/currency", timeout=10).json()
-            return {"userid": str(u["id"]), "display_name": u["displayName"], "robux": str(curr.get("robux", 0)), "status": "OK"}
+            return {"userid": str(u["id"]), "display_name": u["displayName"], "robux": str(curr.get("robux", 0)), "created": created, "status": "OK"}
         except: return {"status": "Invalid"}
+
+    def get_user_created(self, user_id, proxy=None):
+        if not user_id:
+            return None
+        try:
+            sess = self._create_session(proxy)
+            r = sess.get(f"https://users.roblox.com/v1/users/{user_id}", timeout=10)
+            if r.status_code == 200:
+                return r.json().get("created")
+        except Exception:
+            return None
+        return None
 
     def get_id(self, user):
         try: return HttpClient.post("https://users.roblox.com/v1/usernames/users", json={"usernames": [user], "excludeBannedUsers": True}).json()["data"][0]["id"]
@@ -724,7 +773,7 @@ class RobloxClient:
 
 class WebAutomation:
     def __init__(self, log_func): self.log = log_func
-    def open(self, u, p, cookie, target_url, cb, mode="NORMAL", proxy=None, signup_year=None, signup_gender=None):
+    def open(self, u, p, cookie, target_url, cb, mode="NORMAL", proxy=None, signup_year=None, signup_gender=None, new_password=None):
         self.log(f"Opening Edge Browser ({mode})...")
         driver = None
         try:
@@ -855,6 +904,60 @@ class WebAutomation:
                     except: break
                     time.sleep(1)
                 driver.quit(); return
+            if mode == "CHANGE_PASSWORD":
+                success = False
+                message = "Password change failed."
+                try:
+                    if not new_password:
+                        message = "New password missing."
+                    else:
+                        self.log("Attempting password change...")
+                        try:
+                            change_btn = WebDriverWait(driver, 10).until(
+                                EC.element_to_be_clickable((By.XPATH, "//button[contains(., 'Change Password') or contains(., 'Change password')]"))
+                            )
+                            driver.execute_script("arguments[0].scrollIntoView({block: 'center'});", change_btn)
+                            change_btn.click()
+                        except Exception:
+                            pass
+                        time.sleep(1)
+                        pw_inputs = driver.find_elements(By.XPATH, "//input[@type='password']")
+                        if len(pw_inputs) >= 3:
+                            pw_inputs[0].clear()
+                            pw_inputs[0].send_keys(p)
+                            pw_inputs[1].clear()
+                            pw_inputs[1].send_keys(new_password)
+                            pw_inputs[2].clear()
+                            pw_inputs[2].send_keys(new_password)
+                            save_clicked = False
+                            for by, selector in [
+                                (By.XPATH, "//button[contains(., 'Save') or contains(., 'Update')]"),
+                                (By.XPATH, "//input[@type='submit' and (contains(@value, 'Save') or contains(@value, 'Update'))]"),
+                            ]:
+                                try:
+                                    save_btn = WebDriverWait(driver, 5).until(EC.element_to_be_clickable((by, selector)))
+                                    driver.execute_script("arguments[0].scrollIntoView({block: 'center'});", save_btn)
+                                    save_btn.click()
+                                    save_clicked = True
+                                    break
+                                except Exception:
+                                    continue
+                            if save_clicked:
+                                success = True
+                                message = "Password updated."
+                        else:
+                            message = "Password fields not found."
+                except Exception as e:
+                    message = f"Password change error: {e}"
+                try:
+                    cb(success, message)
+                except Exception:
+                    pass
+                try:
+                    driver.quit()
+                except Exception:
+                    pass
+                return
             if mode == "SIGNUP":
                 start = time.time()
                 while time.time() - start < 600:
@@ -926,7 +1029,7 @@ class ActionBtn(ctk.CTkButton):
 
 
 class InputDialog(ctk.CTkToplevel):
-    def __init__(self, parent, title, prompt):
+    def __init__(self, parent, title, prompt, mask=False):
         super().__init__(parent)
         self.title(title)
         self.res = None
@@ -938,6 +1041,8 @@ class InputDialog(ctk.CTkToplevel):
         
         ctk.CTkLabel(container, text=prompt, text_color=THEME["text_main"], font=FontService.ui(13, "bold")).pack(pady=(14, 8), padx=18)
         self.entry = ctk.CTkEntry(container, width=260, fg_color=THEME["input_bg"], text_color=THEME["text_main"], border_color=THEME["border"], border_width=1, corner_radius=12)
+        if mask:
+            self.entry.configure(show="*")
         self.entry.pack(pady=5, padx=18)
         ActionBtn(container, text="OK", type="primary", command=self.ok).pack(pady=(12, 14))
         Utils.center_window(self, 340, 180)
@@ -1657,6 +1762,8 @@ class AccountManagerWindow(ctk.CTkToplevel):
         self.proxy_entry.insert(0, acc.get("proxy", ""))
         self.proxy_entry.pack(pady=6)
 
+        ActionBtn(t_data, text="Change Password", width=200, type="warning", command=self.change_password).pack(pady=(16, 6))
+
         ActionBtn(self, text="Save Changes", type="success", command=self.save).pack(fill="x", padx=18, pady=(0, 16))
         Utils.center_window(self, 440, 600)
 
@@ -1675,6 +1782,42 @@ class AccountManagerWindow(ctk.CTkToplevel):
             return
         ServerBrowserWindow(self.app, pid, self.acc, self.api, self.app.launch)
         self.destroy()
+
+    def change_password(self):
+        if not self.acc.get("cookie"):
+            messagebox.showerror("Error", "No cookie set for this account.")
+            return
+        current_password = self.acc.get("password")
+        if not current_password:
+            messagebox.showerror("Error", "No current password saved for this account.")
+            return
+        dialog = InputDialog(self, "Change Password", "New password:", mask=True)
+        new_password = dialog.ask()
+        if not new_password:
+            return
+
+        def _change():
+            def _cb(success, message):
+                if success:
+                    self.acc["password"] = CryptoUtil.encrypt(new_password)
+                    AccountStore.save(self.app.data)
+                    self.cb()
+                    self.after(0, lambda: messagebox.showinfo("Password Update", message))
+                    self.after(0, self.destroy)
+                else:
+                    self.after(0, lambda: messagebox.showerror("Password Update", message))
+            self.app.safe_log(f"[INFO] Changing password for {self.acc['username']}...")
+            self.app.browser.open(
+                self.acc.get("username", ""),
+                CryptoUtil.decrypt(current_password),
+                self.acc.get("cookie"),
+                "https://www.roblox.com/my/account#!/security",
+                _cb,
+                mode="CHANGE_PASSWORD",
+                proxy=self.acc.get("proxy"),
+                new_password=new_password,
+            )
+        threading.Thread(target=_change, daemon=True).start()
 
     def save(self):
         pid = self.place_entry.get().strip()
@@ -1714,6 +1857,35 @@ class App(ctk.CTk):
         self.title(f"{APP_NAME}")
         self.geometry("1220x840")
         self.configure(fg_color=THEME["bg"])
+        self._splash = None
+        self._splash_bar = None
+        self._splash_label = None
+        self._refresh_after_id = None
+        self._loading_phrase_id = None
+        self._loading_anim_id = None
+        self._splash_started_at = None
+        self._render_started_at = None
+        self._render_min_duration = 0.8
+        self._render_finish_id = None
+        self._render_force_id = None
+        self._render_force_timeout = 8.0
+        self._loading_phrases = [
+            "Warming up session...",
+            "Loading profiles...",
+            "Caching avatars...",
+            "Preparing dashboard...",
+            "Finalizing layout...",
+        ]
+        self._loading_phrase_index = 0
+        self._ui_ready = False
+        self._suppress_loading_overlay = False
+        self._show_splash()
+        self.after(10, self._init_ui)
+
+    def _init_ui(self):
+        if self._ui_ready:
+            return
+        self._ui_ready = True
         icon_path = os.path.join(os.getcwd(), "icon.ico")
         if os.path.exists(icon_path):
             try:
@@ -1818,9 +1990,29 @@ class App(ctk.CTk):
         self.tabs.pack(fill="both", expand=True)
         self.tabs.add("Accounts")
         self.tabs.add("Game Tools")
+
+        accounts_tab = self.tabs.tab("Accounts")
+        controls = ctk.CTkFrame(accounts_tab, fg_color="transparent")
+        controls.pack(fill="x", padx=6, pady=(0, 6))
+        ctk.CTkLabel(controls, text="Sort by:", text_color=THEME["text_sub"], font=FontService.ui(11)).pack(side="left")
+        self.sort_var = ctk.StringVar(value="Name (A-Z)")
+        sort_options = ["Name (A-Z)", "Name (Z-A)", "Oldest Account First", "Newest Account First"]
+        self.sort_menu = ctk.CTkOptionMenu(
+            controls,
+            values=sort_options,
+            variable=self.sort_var,
+            command=lambda _: self.request_refresh_ui(),
+            fg_color=THEME["card_bg"],
+            button_color=THEME["card_bg"],
+            button_hover_color=THEME["card_hover"],
+            text_color=THEME["text_main"],
+            dropdown_fg_color=THEME["card_bg"],
+            dropdown_hover_color=THEME["card_hover"],
+        )
+        self.sort_menu.pack(side="left", padx=8)
         
         self.scroll = ctk.CTkScrollableFrame(
-            self.tabs.tab("Accounts"),
+            accounts_tab,
             fg_color="transparent",
             scrollbar_button_color=THEME["border"],
             scrollbar_button_hover_color=THEME["accent"],
@@ -1829,6 +2021,34 @@ class App(ctk.CTk):
         self.scroll._parent_canvas.bind_all(
             "<MouseWheel>", lambda e: self.scroll._parent_canvas.yview_scroll(int(-1 * (e.delta / 120) * 5), "units")
         )
+
+        self.loading_overlay = ctk.CTkFrame(accounts_tab, fg_color=THEME["card_bg"], corner_radius=18)
+        self.loading_label = ctk.CTkLabel(
+            self.loading_overlay,
+            text="Warming up session...",
+            text_color=THEME["text_main"],
+            font=FontService.ui(14, "bold"),
+        )
+        self.loading_label.pack(padx=24, pady=(20, 6))
+        self.loading_bar = ctk.CTkProgressBar(
+            self.loading_overlay,
+            width=260,
+            height=8,
+            corner_radius=8,
+            fg_color=THEME["border"],
+            progress_color=THEME["accent"],
+            mode="determinate",
+        )
+        self.loading_bar.set(0)
+        self.loading_bar.pack(padx=24, pady=(0, 10), fill="x")
+        self.loading_progress = ctk.CTkLabel(
+            self.loading_overlay,
+            text="",
+            text_color=THEME["text_sub"],
+            font=FontService.ui(12),
+        )
+        self.loading_progress.pack(padx=24, pady=(0, 20))
+        self.loading_overlay.place_forget()
         
         self.setup_tools()
         Utils.center_window(self, 1220, 840)
@@ -1918,6 +2138,8 @@ class App(ctk.CTk):
             if "cookie" in acc:
                 res = self.api.stats(acc['cookie'], acc.get('user_agent'), acc.get('proxy'))
                 acc["health_status"] = "good" if res.get("status") == "OK" else "bad"
+                if res.get("status"):
+                    acc["status"] = res.get("status")
         def run_check():
             with ThreadPoolExecutor(max_workers=15) as executor:
                 executor.map(check_task, self.data)
@@ -1970,27 +2192,66 @@ class App(ctk.CTk):
         
         self.scroll._parent_canvas.yview_moveto(0)
         
+        sort_option = self.sort_var.get() if hasattr(self, "sort_var") else "Name (A-Z)"
+
         for acc in self.data:
             grp = acc.get('group', 'Ungrouped')
             if grp == 'Ungrouped': grp = "Verified" if "cookie" in acc else "Non-Verified"
             acc['_display_group'] = grp
-        self.data.sort(key=lambda x: (x['_display_group'], 0 if "cookie" in x else 1, x['username'].lower()))
-        
-        current_group = None
+
+        grouped = {}
         for acc in self.data:
-            grp = acc['_display_group']
-            if grp != current_group:
-                current_group = grp
-                gf = ctk.CTkFrame(self.scroll, height=30, fg_color="transparent")
-                gf.pack(fill="x", pady=(15, 5))
-                ctk.CTkLabel(gf, text=f"📂 {grp}", font=FontService.ui(14, "bold"), text_color=THEME["text_sub"]).pack(side="left", padx=6)
-            self.card(acc)
-            
-        acc_names = [a['username'] for a in self.data if "cookie" in a]
-        if not acc_names: acc_names = ["No Verified Accounts"]
-        if hasattr(self, 'job_acc_menu'):
-            self.job_acc_menu.configure(values=acc_names)
-            if self.job_acc_var.get() not in acc_names: self.job_acc_var.set(acc_names[0])
+            grouped.setdefault(acc['_display_group'], []).append(acc)
+
+        def sort_by_name(acc):
+            return acc['username'].lower()
+
+        def sort_by_age(acc, newest=False):
+            ts = Utils.created_timestamp(acc.get("created"))
+            missing = ts is None
+            if ts is None:
+                ts = 0
+            return (missing, -ts if newest else ts)
+
+        group_order = sorted(grouped.keys())
+        ordered_accounts = []
+        for grp in group_order:
+            accounts = grouped[grp]
+            if sort_option == "Name (Z-A)":
+                accounts = sorted(accounts, key=sort_by_name, reverse=True)
+            elif sort_option == "Oldest Account First":
+                accounts = sorted(accounts, key=lambda acc: sort_by_age(acc, newest=False))
+            elif sort_option == "Newest Account First":
+                accounts = sorted(accounts, key=lambda acc: sort_by_age(acc, newest=True))
+            else:
+                accounts = sorted(accounts, key=sort_by_name)
+            ordered_accounts.extend(accounts)
+
+        self._render_token = getattr(self, "_render_token", 0) + 1
+        token = self._render_token
+        self._render_queue = ordered_accounts
+        self._render_index = 0
+        self._render_group = None
+        show_overlay = not getattr(self, "_suppress_loading_overlay", False)
+        self._suppress_loading_overlay = False
+        self._render_started_at = time.time()
+        if show_overlay:
+            self._show_loading_overlay(len(ordered_accounts))
+        else:
+            self._hide_loading_overlay()
+        self.after(10, lambda: self._render_next_batch(token))
+
+    def request_refresh_ui(self, delay=120):
+        if self._refresh_after_id is not None:
+            try:
+                self.after_cancel(self._refresh_after_id)
+            except Exception:
+                pass
+        self._refresh_after_id = self.after(delay, self._run_refresh_ui)
+
+    def _run_refresh_ui(self):
+        self._refresh_after_id = None
+        self.refresh_ui()
 
     def card(self, acc):
         is_verified = "cookie" in acc
@@ -2051,6 +2312,21 @@ class App(ctk.CTk):
             game_btn.pack(side="left")
 
             ctk.CTkLabel(name_row, text=f" • {status_text}", font=FontService.ui(11), text_color=stat_col).pack(side="left")
+
+            if acc.get("userid") and not acc.get("created") and not acc.get("_created_fetching"):
+                acc["_created_fetching"] = True
+                def fetch_created():
+                    created = self.api.get_user_created(acc.get("userid"), acc.get("proxy"))
+                    if created:
+                        acc["created"] = created
+                        AccountStore.save(self.data)
+                    acc.pop("_created_fetching", None)
+                    self.after(0, self.request_refresh_ui)
+                threading.Thread(target=fetch_created, daemon=True).start()
+
+            age_label = Utils.account_age_label(acc.get("created"))
+            if age_label:
+                ctk.CTkLabel(name_row, text=f" • {age_label}", font=FontService.ui(11), text_color=THEME["text_sub"]).pack(side="left")
         else:
             ctk.CTkLabel(name_row, text=" • Not Verified", font=FontService.ui(11), text_color=THEME["text_sub"]).pack(side="left")
 
@@ -2077,10 +2353,223 @@ class App(ctk.CTk):
         ActionBtn(actions, text="⚙", width=30, height=24, type="subtle", command=lambda: self.show_menu(acc)).pack(side="left", padx=3)
         ActionBtn(actions, text="🗑", width=30, height=24, type="danger", command=lambda: self.delete(acc)).pack(side="left", padx=3)
 
+    def _show_loading_overlay(self, total):
+        if total <= 0:
+            self.loading_overlay.place_forget()
+            return
+        self._stop_loading_phrase_updates()
+        self._loading_phrase_index = -1
+        self._render_started_at = time.time()
+        if self._render_finish_id is not None:
+            try:
+                self.after_cancel(self._render_finish_id)
+            except Exception:
+                pass
+            self._render_finish_id = None
+        if self._render_force_id is not None:
+            try:
+                self.after_cancel(self._render_force_id)
+            except Exception:
+                pass
+            self._render_force_id = None
+        self._render_force_id = self.after(int(self._render_force_timeout * 1000), self._force_finish_render)
+        self._update_loading_phrase_for_progress(0)
+        self.loading_progress.configure(text=f"0/{total}")
+        self.loading_bar.set(0)
+        if self._splash_bar:
+            self._splash_bar.set(0)
+        self.loading_overlay.place(relx=0.5, rely=0.4, anchor="center")
+        self.loading_overlay.lift()
+        self.loading_overlay.update_idletasks()
+        if self._splash:
+            self._splash.update_idletasks()
+
+    def _hide_loading_overlay(self):
+        self._stop_loading_phrase_updates()
+        self.loading_overlay.place_forget()
+        self._hide_splash()
+
+    def _render_next_batch(self, token, batch_size=12):
+        if token != getattr(self, "_render_token", None):
+            return
+        total = len(self._render_queue)
+        if total == 0:
+            self._hide_loading_overlay()
+            return
+        end = min(self._render_index + batch_size, total)
+        for acc in self._render_queue[self._render_index:end]:
+            grp = acc['_display_group']
+            if grp != self._render_group:
+                self._render_group = grp
+                gf = ctk.CTkFrame(self.scroll, height=30, fg_color="transparent")
+                gf.pack(fill="x", pady=(15, 5))
+                ctk.CTkLabel(gf, text=f"📂 {grp}", font=FontService.ui(14, "bold"), text_color=THEME["text_sub"]).pack(side="left", padx=6)
+            self.card(acc)
+        self._render_index = end
+        self.loading_progress.configure(text=f"{self._render_index}/{total}")
+        if total > 0:
+            progress = self._render_index / total
+            elapsed = (time.time() - self._render_started_at) if self._render_started_at else 0
+            if elapsed < self._render_min_duration:
+                progress = min(progress, elapsed / self._render_min_duration)
+            self.loading_bar.set(progress)
+            if self._splash_bar:
+                self._splash_bar.set(progress)
+                self._splash_bar.update_idletasks()
+            self.loading_bar.update_idletasks()
+            self._update_loading_phrase_for_progress(progress)
+        if self._render_index >= total:
+            if self._defer_finish_render():
+                return
+        self.after(5, lambda: self._render_next_batch(token, batch_size=batch_size))
+
+    def _show_splash(self):
+        if self._splash:
+            return
+        self.withdraw()
+        splash = ctk.CTkToplevel(self)
+        splash.overrideredirect(True)
+        splash.configure(fg_color=THEME["bg"])
+        width, height = 420, 180
+        Utils.center_window(splash, width, height)
+        container = ctk.CTkFrame(splash, fg_color=THEME["card_bg"], corner_radius=18)
+        container.pack(fill="both", expand=True, padx=12, pady=12)
+        ctk.CTkLabel(
+            container,
+            text="LOADING",
+            text_color=THEME["text_main"],
+            font=FontService.ui(20, "bold"),
+        ).pack(pady=(26, 8))
+        bar = ctk.CTkProgressBar(
+            container,
+            width=260,
+            height=8,
+            corner_radius=8,
+            fg_color=THEME["border"],
+            progress_color=THEME["accent"],
+            mode="determinate",
+        )
+        bar.pack(pady=(0, 8))
+        bar.set(0)
+        bar.update_idletasks()
+        label = ctk.CTkLabel(
+            container,
+            text="Warming up session...",
+            text_color=THEME["text_sub"],
+            font=FontService.ui(12),
+        )
+        label.pack(pady=(0, 20))
+        splash.lift()
+        splash.update_idletasks()
+        splash.update()
+        self._splash = splash
+        self._splash_bar = bar
+        self._splash_label = label
+        self._splash_started_at = time.time()
+        self._stop_loading_phrase_updates()
+        self._loading_phrase_index = -1
+        self._update_loading_phrase_for_progress(0)
+
+    def _hide_splash(self):
+        if not self._splash:
+            return
+        if self._splash_started_at is not None:
+            elapsed = time.time() - self._splash_started_at
+            if elapsed < 1.2:
+                self.after(int((1.2 - elapsed) * 1000), self._hide_splash)
+                return
+        self._stop_loading_phrase_updates()
+        try:
+            self._splash.destroy()
+        except Exception:
+            pass
+        self._splash = None
+        self._splash_bar = None
+        self._splash_label = None
+        self._splash_started_at = None
+        self.deiconify()
+
+    def _update_loading_phrase_for_progress(self, progress):
+        if not self._loading_phrases:
+            return
+        progress = max(0.0, min(1.0, progress))
+        phrase_count = len(self._loading_phrases)
+        target_index = min(phrase_count - 1, int(progress * phrase_count))
+        if target_index == self._loading_phrase_index:
+            return
+        self._loading_phrase_index = target_index
+        phrase = self._loading_phrases[target_index]
+        if hasattr(self, "loading_label"):
+            self.loading_label.configure(text=phrase)
+        if self._splash_label:
+            self._splash_label.configure(text=phrase)
+
+    def _stop_loading_phrase_updates(self):
+        if self._loading_phrase_id is None:
+            return
+        try:
+            self.after_cancel(self._loading_phrase_id)
+        except Exception:
+            pass
+        self._loading_phrase_id = None
+
+    def _defer_finish_render(self):
+        elapsed = (time.time() - self._render_started_at) if self._render_started_at else 0
+        if self._render_min_duration > 0:
+            progress = min(1.0, elapsed / self._render_min_duration)
+            self.loading_bar.set(progress)
+            if self._splash_bar:
+                self._splash_bar.set(progress)
+                self._splash_bar.update_idletasks()
+            self.loading_bar.update_idletasks()
+            self._update_loading_phrase_for_progress(progress)
+        if elapsed >= self._render_min_duration:
+            self._finalize_render()
+            return False
+        if self._render_finish_id is None:
+            self._render_finish_id = self.after(50, self._defer_finish_render)
+        return True
+
+    def _finalize_render(self):
+        self._render_finish_id = None
+        if self._render_force_id is not None:
+            try:
+                self.after_cancel(self._render_force_id)
+            except Exception:
+                pass
+            self._render_force_id = None
+        self.loading_bar.set(1.0)
+        if self._splash_bar:
+            self._splash_bar.set(1.0)
+            self._splash_bar.update_idletasks()
+        self.loading_bar.update_idletasks()
+        self._hide_loading_overlay()
+        acc_names = [a['username'] for a in self.data if "cookie" in a]
+        if not acc_names: acc_names = ["No Verified Accounts"]
+        if hasattr(self, 'job_acc_menu'):
+            self.job_acc_menu.configure(values=acc_names)
+            if self.job_acc_var.get() not in acc_names: self.job_acc_var.set(acc_names[0])
+
+    def _force_finish_render(self):
+        if self._render_finish_id is not None:
+            try:
+                self.after_cancel(self._render_finish_id)
+            except Exception:
+                pass
+            self._render_finish_id = None
+        self._render_force_id = None
+        self._finalize_render()
+
+    def _start_loading_animation(self):
+        return
+
+    def _stop_loading_animation(self):
+        return
+
     def show_menu(self, acc):
         global parent
         parent = self
-        AccountManagerWindow(self, acc, lambda: self.refresh_ui(), self.api, self)
+        AccountManagerWindow(self, acc, lambda: self.request_refresh_ui(), self.api, self)
         
     def open_game_selector_for(self, acc):
         def cb(pid, target_acc, game_name):
@@ -2089,7 +2578,7 @@ class App(ctk.CTk):
                 acc['last_played_name'] = game_name
                 AccountStore.save(self.data)
                 self.safe_log(f"Changed Game for [{acc['username']}] to [{game_name}]")
-                self.refresh_ui()
+                self.request_refresh_ui()
         GameSelectorWindow(self, cb, [], self, is_sub_window=True, tool_mode="select_only")
 
     def open_server_browser_for(self, acc):
@@ -2144,7 +2633,8 @@ class App(ctk.CTk):
              acc['game_id'] = pid
              
         AccountStore.save(self.data)
-        self.refresh_ui()
+        self._suppress_loading_overlay = True
+        self.request_refresh_ui()
         WebhookService.send_launch_log(self.api, acc['username'], game_name, pid, job, acc.get('userid'), manual_track=False, robux=acc.get('robux','0'), server_info=server_info)
         threading.Thread(target=self._launch_t, args=(acc, pid, job), daemon=True).start()
         
@@ -2154,6 +2644,12 @@ class App(ctk.CTk):
             self.safe_log(f"[SUCCESS] Launched {acc['username']}")
         else: 
             self.safe_log(f"[ERROR] Launch Error: {res}")
+            if res == "Invalid Cookie / No CSRF":
+                acc["status"] = "Invalid"
+                acc["health_status"] = "bad"
+                acc["health"] = 0
+                AccountStore.save(self.data)
+                self.after(0, self.request_refresh_ui)
         
     def login(self, acc): 
         threading.Thread(target=self.browser.open, args=(acc['username'], CryptoUtil.decrypt(acc.get('password')), acc.get('cookie'), "https://www.roblox.com/home", self.update_acc, "LOGIN_ONLY", acc.get('proxy')), daemon=True).start()
@@ -2173,11 +2669,11 @@ class App(ctk.CTk):
         if not found: 
             self.data.append({"username":name, "password":CryptoUtil.encrypt(p), "cookie":c, "user_agent":ua, **stats})
         AccountStore.save(self.data)
-        self.after(0, self.refresh_ui)
+        self.after(0, self.request_refresh_ui)
         self.safe_log(f"[SUCCESS] Saved {name}")
         
     def delete(self, acc): 
-        if messagebox.askyesno("Confirm", "Delete?"): self.data.remove(acc); AccountStore.save(self.data); self.refresh_ui()
+        if messagebox.askyesno("Confirm", "Delete?"): self.data.remove(acc); AccountStore.save(self.data); self.request_refresh_ui()
             
     def refresh(self): 
         self.safe_log("[INFO] Refreshing all accounts (Parallel)...")
@@ -2193,7 +2689,7 @@ class App(ctk.CTk):
                 acc['health'] = Utils.compute_account_health(acc)
         def run_parallel():
             with ThreadPoolExecutor(max_workers=10) as executor: executor.map(update_task, self.data)
-            self.after(0, self.refresh_ui)
+            self.after(0, self.request_refresh_ui)
             self.safe_log("[SUCCESS] Refresh complete.")
         threading.Thread(target=run_parallel, daemon=True).start()
         
@@ -2207,7 +2703,7 @@ class App(ctk.CTk):
                         u, p = l.split(":", 1)
                         self.data.append({"username": u.strip(), "password": CryptoUtil.encrypt(p.strip())})
                 AccountStore.save(self.data)
-                self.refresh_ui()
+                self.request_refresh_ui()
             else:
                 cookies = []
                 for l in text.splitlines():
@@ -2231,9 +2727,9 @@ class App(ctk.CTk):
             self.data.append({"username": username, "cookie": cookie, "user_agent": DEFAULT_UA, **stats})
             self.safe_log(f"[SUCCESS] Imported {username}")
         AccountStore.save(self.data)
-        self.after(0, self.refresh_ui)
+        self.after(0, self.request_refresh_ui)
             
-    def open_settings(self): SettingsWindow(self, lambda:[ConfigService.load(), self.retheme(), self.refresh_ui()])
+    def open_settings(self): SettingsWindow(self, lambda:[ConfigService.load(), self.retheme(), self.request_refresh_ui()])
 
     def retheme(self):
         ThemeService.apply()
@@ -2387,7 +2883,7 @@ class App(ctk.CTk):
                         acc['last_played_name'] = game_name
                     AccountStore.save(self.data)
                     self.safe_log(f"[INFO] Successfully changed all Game to [{game_name}] Place ID: [{pid}]")
-                    self.refresh_ui()
+                    self.request_refresh_ui()
                     
                 elif target_acc and target_acc != "Global Tool Only":
                     acc = next((a for a in self.data if a['username'] == target_acc), None)
