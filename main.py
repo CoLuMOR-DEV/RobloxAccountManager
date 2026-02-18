@@ -508,10 +508,38 @@ class HttpClient:
         "User-Agent": DEFAULT_UA,
         "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,image/apng,*/*;q=0.8"
     })
+
     @classmethod
-    def get(cls, url): return cls._sess.get(url, timeout=10)
+    def request(cls, method, url, retries=2, retry_statuses=None, **kwargs):
+        if retry_statuses is None:
+            retry_statuses = {429, 500, 502, 503, 504}
+        last_response = None
+
+        for attempt in range(retries + 1):
+            try:
+                response = cls._sess.request(method, url, timeout=10, **kwargs)
+                last_response = response
+                if response.status_code not in retry_statuses:
+                    return response
+                if attempt < retries:
+                    time.sleep(min(0.5 * (2 ** attempt), 3))
+            except requests.RequestException:
+                if attempt >= retries:
+                    break
+                time.sleep(min(0.5 * (2 ** attempt), 3))
+
+        if last_response is not None:
+            return last_response
+        raise requests.RequestException(f"Failed {method.upper()} request to {url}")
+
     @classmethod
-    def post(cls, url, json=None): return cls._sess.post(url, json=json, timeout=10)
+    def get(cls, url, **kwargs):
+        return cls.request("GET", url, **kwargs)
+
+    @classmethod
+    def post(cls, url, json=None, **kwargs):
+        return cls.request("POST", url, json=json, **kwargs)
+
     @classmethod
     def set_cookie(cls, cookie):
          if cookie: cls._sess.cookies[".ROBLOSECURITY"] = cookie
@@ -581,6 +609,48 @@ class AssetLoader:
 
 class RobloxClient:
     def __init__(self, log_func): self.log = log_func
+
+    def _safe_json(self, response):
+        try:
+            return response.json()
+        except Exception:
+            return {}
+
+    def _request_launch_ticket(self, session, max_attempts=4):
+        last_status = None
+
+        for attempt in range(max_attempts):
+            csrf_req = session.post("https://auth.roblox.com/v2/logout", timeout=10)
+            csrf = csrf_req.headers.get("x-csrf-token")
+            if not csrf:
+                if csrf_req.status_code == 429:
+                    time.sleep(min(1.2 * (attempt + 1), 6))
+                    last_status = csrf_req.status_code
+                    continue
+                return None, "Invalid Cookie / No CSRF"
+
+            headers = {
+                "x-csrf-token": csrf,
+                "Content-Type": "application/json",
+                "Referer": "https://www.roblox.com/games/",
+                "Origin": "https://www.roblox.com"
+            }
+            ticket_resp = session.post("https://auth.roblox.com/v1/authentication-ticket", headers=headers, timeout=10)
+            ticket = ticket_resp.headers.get("rbx-authentication-ticket")
+            if ticket:
+                return ticket, None
+
+            last_status = ticket_resp.status_code
+            if ticket_resp.status_code == 429:
+                time.sleep(min(1.5 * (attempt + 1), 8))
+                continue
+            if ticket_resp.status_code == 403:
+                return None, "Launch blocked by Roblox (403). Retry in a minute, refresh cookie, or change proxy/IP."
+            return None, f"Launch Error: No Ticket (Code {ticket_resp.status_code})"
+
+        if last_status == 429:
+            return None, "Roblox rate limited launch ticket requests (429). Please wait and try again."
+        return None, f"Launch Error: No Ticket (Code {last_status or 'Unknown'})"
     
     def _create_session(self, proxy=None):
         s = requests.Session()
@@ -590,18 +660,16 @@ class RobloxClient:
 
     def launch(self, acc, place, ua, job_id=None, proxy=None):
         cookie = acc.get("cookie")
+        if not cookie:
+            return "No cookie set for account."
         s = self._create_session(proxy)
         if ua: s.headers.update({"User-Agent": ua})
         
         try:
             s.cookies[".ROBLOSECURITY"] = cookie
-            csrf_req = s.post("https://auth.roblox.com/v2/logout", timeout=10)
-            csrf = csrf_req.headers.get("x-csrf-token")
-            if not csrf: return "Invalid Cookie / No CSRF"
-            
-            r = s.post("https://auth.roblox.com/v1/authentication-ticket", headers={"x-csrf-token": csrf, "Content-Type": "application/json"}, timeout=10)
-            ticket = r.headers.get("rbx-authentication-ticket")
-            if not ticket: return f"Launch Error: No Ticket (Code {r.status_code})"
+            ticket, ticket_error = self._request_launch_ticket(s)
+            if ticket_error:
+                return ticket_error
             
             ts = int(time.time() * 1000)
             job_p = f"%26gameId%3D{job_id}" if job_id else ""
@@ -623,16 +691,19 @@ class RobloxClient:
             cmd = f"roblox-player:1+launchmode:play+gameinfo:{ticket}+launchtime:{ts}+placelauncherurl:{url}"
             os.startfile(cmd)
             return True
-        except Exception as e: return str(e)
+        except requests.RequestException as e:
+            return f"Network error during launch: {e}"
+        except Exception as e:
+            return str(e)
 
     def get_game_name(self, place_id):
         try:
             r = HttpClient.get(f"https://games.roblox.com/v1/games/multiget-place-details?placeIds={place_id}")
-            d = r.json()
+            d = self._safe_json(r)
             if d and len(d) > 0: return d[0]["name"]
             
             r2 = HttpClient.get(f"https://games.roblox.com/v1/games?universeIds={place_id}")
-            d2 = r2.json()
+            d2 = self._safe_json(r2)
             if d2.get("data"): return d2["data"][0]["name"]
 
             return f"Place {place_id}"
@@ -707,15 +778,16 @@ class RobloxClient:
         try:
             url = f"https://games.roblox.com/v1/games/{place_id}/servers/Public?sortOrder={sort_order}&limit={limit}&excludeFullGames=false"
             if cursor: url += f"&cursor={cursor}"
-            r = HttpClient.get(url); data = r.json()
+            r = HttpClient.get(url); data = self._safe_json(r)
             
             if r.status_code != 200 or not data.get("data"):
                 try:
                     r2 = HttpClient.get(f"https://games.roblox.com/v1/games?universeIds={place_id}")
-                    pid = r2.json()["data"][0]["rootPlaceId"]
+                    r2_data = self._safe_json(r2)
+                    pid = r2_data["data"][0]["rootPlaceId"]
                     url = f"https://games.roblox.com/v1/games/{pid}/servers/Public?sortOrder={sort_order}&limit={limit}&excludeFullGames=false"
                     if cursor: url += f"&cursor={cursor}"
-                    r = HttpClient.get(url); data = r.json()
+                    r = HttpClient.get(url); data = self._safe_json(r)
                 except: pass
             return data.get("data", []), data.get("nextPageCursor")
         except: return [], None
