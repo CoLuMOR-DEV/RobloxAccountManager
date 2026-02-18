@@ -712,17 +712,6 @@ class RobloxClient:
         if proxy: s.proxies.update({"http": proxy, "https": proxy})
         return s
 
-    def _launch_via_web_fallback(self, place, job_id=None):
-        try:
-            if job_id:
-                url = f"https://www.roblox.com/games/start?placeId={place}&gameInstanceId={job_id}"
-            else:
-                url = f"https://www.roblox.com/games/{place}"
-            os.startfile(url)
-            return True
-        except Exception:
-            return False
-
     def launch(self, acc, place, ua, job_id=None, proxy=None):
         cookie = acc.get("cookie")
         if not cookie:
@@ -736,8 +725,7 @@ class RobloxClient:
             ticket, ticket_error = self._request_launch_ticket(s, place)
             if ticket_error:
                 if "403" in ticket_error or "429" in ticket_error:
-                    if self._launch_via_web_fallback(place, job_id):
-                        return f"{ticket_error} | Opened Roblox web launch fallback."
+                    return f"WEB_LOGIN_LAUNCH_REQUIRED: {ticket_error}"
                 return ticket_error
             
             ts = int(time.time() * 1000)
@@ -2778,19 +2766,40 @@ class App(ctk.CTk):
         self.request_refresh_ui()
         WebhookService.send_launch_log(self.api, acc['username'], game_name, pid, job, acc.get('userid'), manual_track=False, robux=acc.get('robux','0'), server_info=server_info)
         threading.Thread(target=self._launch_t, args=(acc, pid, job), daemon=True).start()
-        
+
+    def _build_browser_launch_url(self, pid, job):
+        if job:
+            return f"https://www.roblox.com/games/start?placeId={pid}&gameInstanceId={job}"
+        return f"https://www.roblox.com/games/{pid}"
+
+    def _browser_launch_t(self, acc, pid, job):
+        target_url = self._build_browser_launch_url(pid, job)
+        self.safe_log(f"[INFO] Browser launch fallback for {acc['username']} -> {target_url}")
+        threading.Thread(
+            target=self.browser.open,
+            args=(acc.get('username', ''), "", acc.get('cookie'), target_url, lambda *_: None, "NORMAL", acc.get('proxy')),
+            daemon=True
+        ).start()
+
     def _launch_t(self, acc, pid, job):
         res = self.api.launch(acc, pid, acc.get('user_agent'), job, acc.get('proxy'))
-        if res is True or (isinstance(res, str) and res.startswith("Launched via")): 
+        if res is True or (isinstance(res, str) and res.startswith("Launched via")):
             self.safe_log(f"[SUCCESS] Launched {acc['username']}")
-        else: 
-            self.safe_log(f"[ERROR] Launch Error: {res}")
-            if res == "Invalid Cookie / No CSRF":
-                acc["status"] = "Invalid"
-                acc["health_status"] = "bad"
-                acc["health"] = 0
-                AccountStore.save(self.data)
-                self.after(0, self.request_refresh_ui)
+            return
+
+        if isinstance(res, str) and res.startswith("WEB_LOGIN_LAUNCH_REQUIRED:"):
+            reason = res.split(":", 1)[1].strip() if ":" in res else res
+            self.safe_log(f"[WARN] {reason}")
+            self._browser_launch_t(acc, pid, job)
+            return
+
+        self.safe_log(f"[ERROR] Launch Error: {res}")
+        if res == "Invalid Cookie / No CSRF":
+            acc["status"] = "Invalid"
+            acc["health_status"] = "bad"
+            acc["health"] = 0
+            AccountStore.save(self.data)
+            self.after(0, self.request_refresh_ui)
         
     def login(self, acc): 
         threading.Thread(target=self.browser.open, args=(acc['username'], CryptoUtil.decrypt(acc.get('password')), acc.get('cookie'), "https://www.roblox.com/home", self.update_acc, "LOGIN_ONLY", acc.get('proxy')), daemon=True).start()
