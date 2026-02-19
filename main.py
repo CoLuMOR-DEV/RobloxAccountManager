@@ -20,13 +20,17 @@ import tkinter.font as tkfont
 from selenium import webdriver
 from selenium.webdriver.edge.service import Service
 from selenium.webdriver.edge.options import Options as EdgeOptions
+from selenium.webdriver.chrome.service import Service as ChromeService
+from selenium.webdriver.chrome.options import Options as ChromeOptions
 from selenium.webdriver.common.by import By
 from selenium.webdriver.support.ui import WebDriverWait, Select
 from selenium.webdriver.support import expected_conditions as EC
 from selenium.common.exceptions import SessionNotCreatedException
 
 EDGE_BINARY_PATH = r"C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe"
-DRIVER_PATH = r"msedgedriver.exe"
+BRAVE_BINARY_PATH = r"C:\Program Files\BraveSoftware\Brave-Browser\Application\brave.exe"
+EDGE_DRIVER_PATH = r"msedgedriver.exe"
+CHROME_DRIVER_PATH = r"chromedriver.exe"
 
 APP_NAME = "cx.manager"
 VERSION = "v0.1.0"
@@ -911,28 +915,51 @@ class WebAutomation:
         self.log(f"Opening Edge Browser ({mode})...")
         driver = None
         try:
-            o = EdgeOptions(); o.use_chromium = True; o.binary_location = EDGE_BINARY_PATH
-            o.add_argument("--no-sandbox"); o.add_argument("--disable-gpu")
-            o.add_argument("--disable-dev-shm-usage"); o.add_argument("--disable-blink-features=AutomationControlled")
-            o.add_argument("--disable-extensions"); o.add_experimental_option("excludeSwitches", ["enable-automation"])
-            o.add_experimental_option("useAutomationExtension", False); o.page_load_strategy = "normal"
-            if proxy: o.add_argument(f"--proxy-server={proxy}")
-            driver_ready = False
-            if os.path.exists(DRIVER_PATH):
-                try:
-                    driver = webdriver.Edge(service=Service(executable_path=DRIVER_PATH), options=o)
-                    driver_ready = True
-                except SessionNotCreatedException as e:
-                    self.log(f"Local EdgeDriver version mismatch: {e}")
-                    self.log("Falling back to Selenium Manager to resolve a matching EdgeDriver...")
-                except Exception as e:
-                    self.log(f"Local EdgeDriver failed: {e}")
-                    self.log("Falling back to Selenium Manager...")
-            else:
-                self.log("Driver not found in folder. Trying Selenium Manager...")
+            launch_mode = CONFIG.get("launch_mode", "Auto")
+            prefer_brave = launch_mode == "Launch via Browser"
 
-            if not driver_ready:
-                driver = webdriver.Edge(options=o)
+            if prefer_brave:
+                b = ChromeOptions()
+                if os.path.exists(BRAVE_BINARY_PATH):
+                    b.binary_location = BRAVE_BINARY_PATH
+                b.add_argument("--incognito")
+                b.add_argument("--no-sandbox"); b.add_argument("--disable-gpu")
+                b.add_argument("--disable-dev-shm-usage"); b.add_argument("--disable-blink-features=AutomationControlled")
+                b.add_argument("--disable-extensions"); b.add_experimental_option("excludeSwitches", ["enable-automation"])
+                b.add_experimental_option("useAutomationExtension", False); b.page_load_strategy = "normal"
+                if proxy: b.add_argument(f"--proxy-server={proxy}")
+                try:
+                    if os.path.exists(CHROME_DRIVER_PATH):
+                        driver = webdriver.Chrome(service=ChromeService(executable_path=CHROME_DRIVER_PATH), options=b)
+                    else:
+                        driver = webdriver.Chrome(options=b)
+                    self.log("Using Brave browser in private window mode for launch flow.")
+                except Exception as e:
+                    self.log(f"Brave private launch failed, falling back to Edge: {e}")
+
+            if driver is None:
+                o = EdgeOptions(); o.use_chromium = True; o.binary_location = EDGE_BINARY_PATH
+                o.add_argument("--no-sandbox"); o.add_argument("--disable-gpu")
+                o.add_argument("--disable-dev-shm-usage"); o.add_argument("--disable-blink-features=AutomationControlled")
+                o.add_argument("--disable-extensions"); o.add_experimental_option("excludeSwitches", ["enable-automation"])
+                o.add_experimental_option("useAutomationExtension", False); o.page_load_strategy = "normal"
+                if proxy: o.add_argument(f"--proxy-server={proxy}")
+                driver_ready = False
+                if os.path.exists(EDGE_DRIVER_PATH):
+                    try:
+                        driver = webdriver.Edge(service=Service(executable_path=EDGE_DRIVER_PATH), options=o)
+                        driver_ready = True
+                    except SessionNotCreatedException as e:
+                        self.log(f"Local EdgeDriver version mismatch: {e}")
+                        self.log("Falling back to Selenium Manager to resolve a matching EdgeDriver...")
+                    except Exception as e:
+                        self.log(f"Local EdgeDriver failed: {e}")
+                        self.log("Falling back to Selenium Manager...")
+                else:
+                    self.log("Edge driver not found in folder. Trying Selenium Manager...")
+
+                if not driver_ready:
+                    driver = webdriver.Edge(options=o)
             try: 
                 w,h = driver.execute_script("return [window.screen.availWidth, window.screen.availHeight]")
                 driver.set_window_rect(x=(w-1000)//2, y=(h-800)//2, width=1000, height=800)
