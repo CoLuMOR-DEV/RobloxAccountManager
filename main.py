@@ -55,7 +55,8 @@ CONFIG = {
     "bootstrapper_preference": "Auto",
     "presence_tracking": True,
     "presence_interval": 10,
-    "discord_webhook": ""
+    "discord_webhook": "",
+    "launch_mode": "Auto"
 }
 
 THEME = {
@@ -455,6 +456,9 @@ class ConfigService:
         CONFIG.setdefault("presence_interval", 10)
         CONFIG.pop("use_fishstrap", None)
         CONFIG.setdefault("discord_webhook", "")
+        CONFIG.setdefault("launch_mode", "Auto")
+        if CONFIG.get("launch_mode") not in ["Auto", "Launch Directly", "Launch via Browser"]:
+            CONFIG["launch_mode"] = "Auto"
         ThemeService.apply()
 
     @staticmethod
@@ -1374,6 +1378,7 @@ class SettingsWindow(ctk.CTkToplevel):
         self.bootstrapper_var = ctk.BooleanVar(value=CONFIG.get("use_bootstrapper", True))
         self.bootstrapper_pref = ctk.StringVar(value=CONFIG.get("bootstrapper_preference", "Auto"))
         self.presence_var = ctk.BooleanVar(value=CONFIG.get("presence_tracking", True))
+        self.launch_mode_var = ctk.StringVar(value=CONFIG.get("launch_mode", "Auto"))
 
         toggles = ctk.CTkFrame(wrap, fg_color="transparent")
         toggles.pack(fill="x", padx=16, pady=(2, 12))
@@ -1400,6 +1405,20 @@ class SettingsWindow(ctk.CTkToplevel):
             dropdown_fg_color=THEME["card_bg"],
         )
         self.bootstrapper_menu.pack(fill="x", padx=16, pady=(0, 12))
+
+        ctk.CTkLabel(wrap, text="Launch Mode", text_color=THEME["text_sub"], font=FontService.ui(12, "bold")).pack(anchor="w", padx=16, pady=(6, 6))
+        self.launch_mode_menu = ctk.CTkOptionMenu(
+            wrap,
+            variable=self.launch_mode_var,
+            values=["Auto", "Launch Directly", "Launch via Browser"],
+            fg_color=THEME["input_bg"],
+            button_color=THEME["accent"],
+            button_hover_color=THEME["accent_hover"],
+            text_color=THEME["text_main"],
+            dropdown_text_color=THEME["text_main"],
+            dropdown_fg_color=THEME["card_bg"],
+        )
+        self.launch_mode_menu.pack(fill="x", padx=16, pady=(0, 12))
 
         ctk.CTkLabel(wrap, text="Background Tracking", text_color=THEME["text_sub"], font=FontService.ui(12, "bold")).pack(anchor="w", padx=16, pady=(6, 6))
         self.presence_sw = ctk.CTkSwitch(wrap, text="Presence Tracking", variable=self.presence_var, fg_color=THEME["card_hover"], progress_color=THEME["accent"], button_color=THEME["border"], button_hover_color=THEME["separator"], text_color=THEME["text_main"])
@@ -1432,6 +1451,7 @@ class SettingsWindow(ctk.CTkToplevel):
         CONFIG["use_bootstrapper"] = self.bootstrapper_var.get()
         CONFIG["bootstrapper_preference"] = self.bootstrapper_pref.get()
         CONFIG["presence_tracking"] = self.presence_var.get()
+        CONFIG["launch_mode"] = self.launch_mode_var.get()
         try:
             interval = int(self.presence_interval_entry.get().strip())
         except ValueError:
@@ -2782,6 +2802,12 @@ class App(ctk.CTk):
         ).start()
 
     def _launch_t(self, acc, pid, job):
+        launch_mode = CONFIG.get("launch_mode", "Auto")
+        if launch_mode == "Launch via Browser":
+            self._browser_launch_t(acc, pid, job)
+            self.safe_log(f"[SUCCESS] Browser launch started for {acc['username']}")
+            return
+
         res = self.api.launch(acc, pid, acc.get('user_agent'), job, acc.get('proxy'))
         if res is True or (isinstance(res, str) and res.startswith("Launched via")):
             self.safe_log(f"[SUCCESS] Launched {acc['username']}")
@@ -2790,7 +2816,8 @@ class App(ctk.CTk):
         if isinstance(res, str) and res.startswith("WEB_LOGIN_LAUNCH_REQUIRED:"):
             reason = res.split(":", 1)[1].strip() if ":" in res else res
             self.safe_log(f"[WARN] {reason}")
-            self._browser_launch_t(acc, pid, job)
+            if launch_mode == "Auto":
+                self._browser_launch_t(acc, pid, job)
             return
 
         self.safe_log(f"[ERROR] Launch Error: {res}")
