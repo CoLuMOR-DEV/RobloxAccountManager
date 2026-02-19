@@ -23,6 +23,7 @@ from selenium.webdriver.edge.options import Options as EdgeOptions
 from selenium.webdriver.common.by import By
 from selenium.webdriver.support.ui import WebDriverWait, Select
 from selenium.webdriver.support import expected_conditions as EC
+from selenium.common.exceptions import SessionNotCreatedException
 
 EDGE_BINARY_PATH = r"C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe"
 DRIVER_PATH = r"msedgedriver.exe"
@@ -916,8 +917,22 @@ class WebAutomation:
             o.add_argument("--disable-extensions"); o.add_experimental_option("excludeSwitches", ["enable-automation"])
             o.add_experimental_option("useAutomationExtension", False); o.page_load_strategy = "normal"
             if proxy: o.add_argument(f"--proxy-server={proxy}")
-            if os.path.exists(DRIVER_PATH): driver = webdriver.Edge(service=Service(executable_path=DRIVER_PATH), options=o)
-            else: self.log("Driver not found in folder. Trying system path..."); driver = webdriver.Edge(options=o)
+            driver_ready = False
+            if os.path.exists(DRIVER_PATH):
+                try:
+                    driver = webdriver.Edge(service=Service(executable_path=DRIVER_PATH), options=o)
+                    driver_ready = True
+                except SessionNotCreatedException as e:
+                    self.log(f"Local EdgeDriver version mismatch: {e}")
+                    self.log("Falling back to Selenium Manager to resolve a matching EdgeDriver...")
+                except Exception as e:
+                    self.log(f"Local EdgeDriver failed: {e}")
+                    self.log("Falling back to Selenium Manager...")
+            else:
+                self.log("Driver not found in folder. Trying Selenium Manager...")
+
+            if not driver_ready:
+                driver = webdriver.Edge(options=o)
             try: 
                 w,h = driver.execute_script("return [window.screen.availWidth, window.screen.availHeight]")
                 driver.set_window_rect(x=(w-1000)//2, y=(h-800)//2, width=1000, height=800)
